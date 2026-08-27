@@ -2,7 +2,7 @@
 
 A production-style Java 21 and Spring Boot 3 e-commerce system built incrementally as both a runnable distributed application and a practical microservices course.
 
-> **Implementation status:** Product Service and Inventory Service are implemented, containerized, and verified with PostgreSQL integration/concurrency tests. The remaining services and connected distributed workflow are planned and are added in subsequent milestones.
+> **Implementation status:** Auth, Product, and Inventory Services are implemented, containerized, and verified with PostgreSQL/security/concurrency integration tests. User provisioning, Gateway enforcement, and the connected order workflow remain planned milestones.
 
 ## Project Overview
 
@@ -58,7 +58,7 @@ The complete design and current-state warning are maintained in [System Overview
 | Service | Responsibility | Status |
 | --- | --- | --- |
 | API Gateway | Public routing, correlation IDs, edge security | Planned |
-| Auth Service | Credentials, password hashing, JWT and roles | Planned |
+| Auth Service | Credentials, password hashing, JWT and roles | Implemented |
 | User Service | Customer profiles and addresses | Planned |
 | Product Service | Catalog, current prices, filtering and management | Implemented |
 | Inventory Service | Stock, reservations, releases and concurrency | Implemented |
@@ -77,7 +77,7 @@ Detailed ownership and prohibited coupling are documented in [Service Boundaries
 | Maven Wrapper | Reproducible builds without global Maven installation | Active |
 | PostgreSQL | Strong relational constraints and transactional service data | Active in Product and Inventory |
 | Flyway | Versioned, reviewable service-owned schema migrations | Active in Product and Inventory |
-| Spring Security and JWT | Authentication and decentralized token validation | Planned |
+| Spring Security and JWT | Auth lifecycle and public JWKS | Active in Auth; enforcement pending Gateway/services |
 | Spring Cloud Gateway | Reactive edge routing without business logic | Planned |
 | Kafka | Durable asynchronous saga communication and notifications | Planned |
 | Testcontainers | Integration tests against real PostgreSQL/Kafka behavior | Active for PostgreSQL |
@@ -94,6 +94,7 @@ Current:
 ```text
 .
 ├── services/
+│   ├── auth-service/           # Credentials, JWT/JWKS, auth_db, security tests
 │   ├── product-service/        # Catalog API, product_db, tests, and image
 │   └── inventory-service/      # Stock reservations, inventory_db, concurrency tests
 ├── docs/
@@ -210,12 +211,36 @@ Sensitive values such as passwords, raw tokens, private keys, and payment detail
 
 ## Running Locally
 
-### Product Service
-
 Requirements:
 
 - Java 21
 - Docker Desktop (for PostgreSQL/Testcontainers and image builds)
+
+### Auth Service
+
+Start PostgreSQL, then run Auth with an ephemeral local RSA key:
+
+```powershell
+$env:AUTH_DB_PASSWORD = "<choose-a-local-password>"
+docker run --name ecommerce-auth-db --rm -d `
+  -e POSTGRES_DB=auth_db `
+  -e POSTGRES_USER=auth_app `
+  -e POSTGRES_PASSWORD=$env:AUTH_DB_PASSWORD `
+  -p 5434:5432 postgres:17.6-alpine
+
+$env:AUTH_DB_URL = "jdbc:postgresql://localhost:5434/auth_db"
+.\mvnw.cmd -pl services/auth-service spring-boot:run
+```
+
+Auth readiness is `http://localhost:8081/actuator/health/readiness`; JWKS is `http://localhost:8081/.well-known/jwks.json`.
+
+Build the production-style local image:
+
+```powershell
+docker build -f services/auth-service/Dockerfile -t ecommerce/auth-service:local .
+```
+
+### Product Service
 
 Run tests on Windows:
 
@@ -314,9 +339,33 @@ Inventory Service supports:
 | `INVENTORY_DB_POOL_SIZE` | Maximum inventory database pool size | `10` |
 | `INVENTORY_DB_MIN_IDLE` | Minimum inventory idle connections | `2` |
 
-Kafka, JWT, and observability variables will be added to `.env.example` with their implementations. A real `.env` file is ignored and never committed.
+Auth Service supports:
+
+| Variable | Purpose | Default |
+| --- | --- | --- |
+| `SERVER_PORT` | Auth Service HTTP port | `8081` |
+| `AUTH_DB_URL` | Auth PostgreSQL JDBC URL | `jdbc:postgresql://localhost:5432/auth_db` |
+| `AUTH_DB_USERNAME` | Auth database user | `auth_app` |
+| `AUTH_DB_PASSWORD` | Auth database password | Required; no default |
+| `AUTH_JWT_ISSUER` | Exact trusted token issuer | `http://localhost:8081` |
+| `AUTH_JWT_ACCESS_TOKEN_TTL` | Access-token lifetime | `PT15M` |
+| `AUTH_JWT_REFRESH_TOKEN_TTL` | Refresh-token lifetime | `P30D` |
+| `AUTH_JWT_PRIVATE_KEY_BASE64` | Base64 PKCS#8 RSA private key | Ephemeral outside production; required in production |
+| `AUTH_JWT_PUBLIC_KEY_BASE64` | Base64 X.509 RSA public key | Derived outside production; required in production |
+
+Kafka and observability variables will be added to `.env.example` with their implementations. A real `.env` file is ignored and never committed.
 
 ## API Examples
+
+Register credentials:
+
+```bash
+curl -X POST http://localhost:8081/api/v1/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{"email":"customer@example.com","password":"correct horse battery staple"}'
+```
+
+Auth details and refresh/key behavior are documented in [Auth Service](services/auth-service/README.md).
 
 Create a product:
 
@@ -333,7 +382,7 @@ Search the catalog:
 curl "http://localhost:8083/api/v1/products?query=laptop&status=ACTIVE&page=0&size=20&sortBy=price&direction=ASC"
 ```
 
-Product details and the stable error contract are documented in [Product Service](services/product-service/README.md). Authentication and order examples will be added only when those endpoints are executable.
+Product details and the stable error contract are documented in [Product Service](services/product-service/README.md). Order examples will be added only when those endpoints are executable.
 
 Create stock using a Product Service UUID, then reserve it for an Order UUID:
 
@@ -356,7 +405,7 @@ Run every implemented service suite:
 .\mvnw.cmd test
 ```
 
-The Product suite has 18 tests. Inventory adds 17 tests including a real concurrent reservation race on PostgreSQL. Each service uses the smallest meaningful combination of unit, controller, repository, integration, and Testcontainers tests. Coverage percentage is not the goal; behavior, edge cases, migrations, queries, concurrency, security, idempotency, and compensation are.
+The Product suite has 18 tests, Inventory has 17 including a real concurrent reservation race, and Auth has 15 covering cryptography and token lifecycle. Each service uses the smallest meaningful combination of unit, controller, repository, integration, security, and Testcontainers tests.
 
 ## Documentation
 
@@ -364,6 +413,8 @@ The Product suite has 18 tests. Inventory adds 17 tests including a real concurr
 - [Service boundaries](docs/architecture/service-boundaries.md)
 - [Database architecture](docs/architecture/database-architecture.md)
 - [Communication policy](docs/architecture/communication.md)
+- [Security architecture](docs/architecture/security.md)
+- [Authentication flow](docs/flows/authentication-flow.md)
 - [Product request flow](docs/flows/product-flow.md)
 - [Inventory reservation flow](docs/flows/inventory-flow.md)
 - [Architecture decisions](docs/decisions/)
@@ -380,8 +431,9 @@ Start with:
 3. [Database per Service](docs/learning/03-database-per-service.md)
 4. [JPA, Flyway, and Local Transactions](docs/learning/04-jpa-flyway-and-local-transactions.md)
 5. [Concurrency and Inventory Reservations](docs/learning/05-concurrency-and-inventory-reservations.md)
-6. Read the three ADRs and compare their alternatives.
-7. Follow the Product and Inventory READMEs from controller to service, domain, repository, migration, and tests.
+6. [Authentication in Microservices](docs/learning/06-authentication-in-microservices.md)
+7. Read the ADRs and compare their alternatives.
+8. Follow the Auth, Product, and Inventory READMEs from controller to service, domain, repository, migration, and tests.
 
 Later notes will reference the exact service, class, endpoint, migration, event, and configuration that implements each concept.
 
