@@ -2,7 +2,7 @@
 
 A production-style Java 21 and Spring Boot 3 e-commerce system built incrementally as both a runnable distributed application and a practical microservices course.
 
-> **Implementation status:** foundation phase. Product Service currently has a verified runnable scaffold. Architecture documents describe accepted target decisions; unimplemented capabilities are explicitly marked as planned.
+> **Implementation status:** foundation phase. Product Service currently has a verified runnable scaffold under `services/`. Architecture documents describe accepted target decisions; unimplemented capabilities are explicitly marked as planned.
 
 ## Project Overview
 
@@ -93,11 +93,16 @@ Current:
 
 ```text
 .
-├── product-service/            # Initial scaffold; moves under services/ next
+├── services/
+│   └── product-service/        # Initial independently runnable service
 ├── docs/
 │   ├── architecture/
 │   ├── decisions/
 │   └── learning/
+├── pom.xml                     # Current reactor build aggregator
+├── mvnw
+├── mvnw.cmd
+├── .mvn/
 └── README.md
 ```
 
@@ -213,15 +218,13 @@ Requirements:
 Run tests on Windows:
 
 ```powershell
-cd product-service
-.\mvnw.cmd test
+.\mvnw.cmd -pl services/product-service test
 ```
 
 Run the service:
 
 ```powershell
-cd product-service
-.\mvnw.cmd spring-boot:run
+.\mvnw.cmd -pl services/product-service spring-boot:run
 ```
 
 Verify health:
@@ -269,8 +272,7 @@ Product, authentication, inventory, and order examples will be added only when t
 Current test suite:
 
 ```powershell
-cd product-service
-.\mvnw.cmd test
+.\mvnw.cmd -pl services/product-service test
 ```
 
 Each service will add the smallest meaningful combination of unit, controller, repository, integration, and Testcontainers tests. Coverage percentage is not the goal; behavior, edge cases, migrations, queries, concurrency, security, idempotency, and compensation are.
@@ -294,7 +296,7 @@ Start with:
 2. [Service Boundaries](docs/learning/02-service-boundaries.md)
 3. [Database per Service](docs/learning/03-database-per-service.md)
 4. Read the three ADRs and compare their alternatives.
-5. Inspect `product-service/pom.xml`, its application entry point, configuration, and context test.
+5. Inspect `services/product-service/pom.xml`, its application entry point, configuration, and context test.
 
 Later notes will reference the exact service, class, endpoint, migration, event, and configuration that implements each concept.
 
