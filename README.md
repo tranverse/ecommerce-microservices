@@ -2,7 +2,7 @@
 
 A production-style Java 21 and Spring Boot 3 e-commerce system built incrementally as both a runnable distributed application and a practical microservices course.
 
-> **Implementation status:** Product Service is implemented and verified with PostgreSQL integration tests. The remaining services and connected distributed workflow are planned and are added in subsequent milestones.
+> **Implementation status:** Product Service and Inventory Service are implemented, containerized, and verified with PostgreSQL integration/concurrency tests. The remaining services and connected distributed workflow are planned and are added in subsequent milestones.
 
 ## Project Overview
 
@@ -61,7 +61,7 @@ The complete design and current-state warning are maintained in [System Overview
 | Auth Service | Credentials, password hashing, JWT and roles | Planned |
 | User Service | Customer profiles and addresses | Planned |
 | Product Service | Catalog, current prices, filtering and management | Implemented |
-| Inventory Service | Stock, reservations, releases and concurrency | Planned |
+| Inventory Service | Stock, reservations, releases and concurrency | Implemented |
 | Order Service | Orders, immutable item snapshots and saga orchestration | Planned |
 | Payment Service | Idempotent simulated payments and compensation | Planned |
 | Notification Service | Asynchronous notification history and delivery simulation | Planned |
@@ -75,8 +75,8 @@ Detailed ownership and prohibited coupling are documented in [Service Boundaries
 | Java 21 | LTS runtime, records, modern language/runtime features | Active |
 | Spring Boot 3.5 | Production application foundation and dependency management | Active |
 | Maven Wrapper | Reproducible builds without global Maven installation | Active |
-| PostgreSQL | Strong relational constraints and transactional service data | Active in Product Service |
-| Flyway | Versioned, reviewable service-owned schema migrations | Active in Product Service |
+| PostgreSQL | Strong relational constraints and transactional service data | Active in Product and Inventory |
+| Flyway | Versioned, reviewable service-owned schema migrations | Active in Product and Inventory |
 | Spring Security and JWT | Authentication and decentralized token validation | Planned |
 | Spring Cloud Gateway | Reactive edge routing without business logic | Planned |
 | Kafka | Durable asynchronous saga communication and notifications | Planned |
@@ -94,7 +94,8 @@ Current:
 ```text
 .
 ├── services/
-│   └── product-service/        # Catalog API, database, tests, and container image
+│   ├── product-service/        # Catalog API, product_db, tests, and image
+│   └── inventory-service/      # Stock reservations, inventory_db, concurrency tests
 ├── docs/
 │   ├── architecture/
 │   ├── decisions/
@@ -259,6 +260,28 @@ Build the production-style local image:
 docker build -f services/product-service/Dockerfile -t ecommerce/product-service:local .
 ```
 
+### Inventory Service
+
+Start a separate PostgreSQL container on host port `5433`, then run the service with the matching JDBC URL:
+
+```powershell
+$env:INVENTORY_DB_PASSWORD = "<choose-a-local-password>"
+$env:INVENTORY_DB_URL = "jdbc:postgresql://localhost:5433/inventory_db"
+docker run --name ecommerce-inventory-db --rm -d `
+  -e POSTGRES_DB=inventory_db `
+  -e POSTGRES_USER=inventory_app `
+  -e POSTGRES_PASSWORD=$env:INVENTORY_DB_PASSWORD `
+  -p 5433:5432 postgres:17.6-alpine
+
+.\mvnw.cmd -pl services/inventory-service spring-boot:run
+```
+
+Inventory readiness is `http://localhost:8084/actuator/health/readiness`; Swagger UI is `http://localhost:8084/swagger-ui.html`.
+
+```powershell
+docker build -f services/inventory-service/Dockerfile -t ecommerce/inventory-service:local .
+```
+
 The final target command will be:
 
 ```text
@@ -280,6 +303,17 @@ Product Service supports:
 | `PRODUCT_DB_POOL_SIZE` | Maximum database pool size | `10` |
 | `PRODUCT_DB_MIN_IDLE` | Minimum idle connections | `2` |
 
+Inventory Service supports:
+
+| Variable | Purpose | Default |
+| --- | --- | --- |
+| `SERVER_PORT` | Inventory Service HTTP port | `8084` |
+| `INVENTORY_DB_URL` | Inventory PostgreSQL JDBC URL | `jdbc:postgresql://localhost:5432/inventory_db` |
+| `INVENTORY_DB_USERNAME` | Inventory database user | `inventory_app` |
+| `INVENTORY_DB_PASSWORD` | Inventory database password | Required; no default |
+| `INVENTORY_DB_POOL_SIZE` | Maximum inventory database pool size | `10` |
+| `INVENTORY_DB_MIN_IDLE` | Minimum inventory idle connections | `2` |
+
 Kafka, JWT, and observability variables will be added to `.env.example` with their implementations. A real `.env` file is ignored and never committed.
 
 ## API Examples
@@ -299,17 +333,30 @@ Search the catalog:
 curl "http://localhost:8083/api/v1/products?query=laptop&status=ACTIVE&page=0&size=20&sortBy=price&direction=ASC"
 ```
 
-Product details and the stable error contract are documented in [Product Service](services/product-service/README.md). Authentication, inventory, and order examples will be added only when those endpoints are executable.
+Product details and the stable error contract are documented in [Product Service](services/product-service/README.md). Authentication and order examples will be added only when those endpoints are executable.
+
+Create stock using a Product Service UUID, then reserve it for an Order UUID:
+
+```bash
+curl -X PUT http://localhost:8084/api/v1/inventory/items/PRODUCT_UUID \
+  -H "Content-Type: application/json" -d '{"totalQuantity":10}'
+
+curl -X POST http://localhost:8084/api/v1/inventory/reservations \
+  -H "Content-Type: application/json" \
+  -d '{"orderId":"ORDER_UUID","items":[{"productId":"PRODUCT_UUID","quantity":2}]}'
+```
+
+Inventory contracts and state semantics are documented in [Inventory Service](services/inventory-service/README.md).
 
 ## Testing
 
-Current Product Service suite:
+Run every implemented service suite:
 
 ```powershell
-.\mvnw.cmd -pl services/product-service test
+.\mvnw.cmd test
 ```
 
-The current 18 tests include domain/service unit behavior, MVC validation/error contracts, JPA repository behavior, two Flyway migrations, and a full HTTP create/read/update/stale-version flow on PostgreSQL. Each service will add the smallest meaningful combination of unit, controller, repository, integration, and Testcontainers tests. Coverage percentage is not the goal; behavior, edge cases, migrations, queries, concurrency, security, idempotency, and compensation are.
+The Product suite has 18 tests. Inventory adds 17 tests including a real concurrent reservation race on PostgreSQL. Each service uses the smallest meaningful combination of unit, controller, repository, integration, and Testcontainers tests. Coverage percentage is not the goal; behavior, edge cases, migrations, queries, concurrency, security, idempotency, and compensation are.
 
 ## Documentation
 
@@ -318,6 +365,7 @@ The current 18 tests include domain/service unit behavior, MVC validation/error 
 - [Database architecture](docs/architecture/database-architecture.md)
 - [Communication policy](docs/architecture/communication.md)
 - [Product request flow](docs/flows/product-flow.md)
+- [Inventory reservation flow](docs/flows/inventory-flow.md)
 - [Architecture decisions](docs/decisions/)
 - [Learning notes](docs/learning/)
 
@@ -331,8 +379,9 @@ Start with:
 2. [Service Boundaries](docs/learning/02-service-boundaries.md)
 3. [Database per Service](docs/learning/03-database-per-service.md)
 4. [JPA, Flyway, and Local Transactions](docs/learning/04-jpa-flyway-and-local-transactions.md)
-5. Read the three ADRs and compare their alternatives.
-6. Follow [Product Service](services/product-service/README.md) from controller to service, domain, repository, migration, and tests.
+5. [Concurrency and Inventory Reservations](docs/learning/05-concurrency-and-inventory-reservations.md)
+6. Read the three ADRs and compare their alternatives.
+7. Follow the Product and Inventory READMEs from controller to service, domain, repository, migration, and tests.
 
 Later notes will reference the exact service, class, endpoint, migration, event, and configuration that implements each concept.
 

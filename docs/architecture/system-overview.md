@@ -8,7 +8,7 @@ The platform supports a customer journey from registration and login through pro
 
 ## Current state
 
-Only the initial Product Service scaffold exists today. The diagram below is the target architecture that guides incremental implementation. A component is not considered implemented until its code, tests, runtime configuration, and documentation are present.
+Product Service and Inventory Service are implemented, tested against PostgreSQL, containerized, and documented. Direct Product-to-Inventory integration is intentionally absent: the future Order workflow will coordinate their independent data through APIs/events. The remaining components in the diagram are target architecture. A component is not considered implemented until its code, tests, runtime configuration, and documentation are present.
 
 ## Target architecture
 
