@@ -2,7 +2,7 @@
 
 A production-style Java 21 and Spring Boot 3 e-commerce system built incrementally as both a runnable distributed application and a practical microservices course.
 
-> **Implementation status:** Auth, Product, and Inventory Services are implemented, containerized, and verified with PostgreSQL/security/concurrency integration tests. User provisioning, Gateway enforcement, and the connected order workflow remain planned milestones.
+> **Implementation status:** Auth, User, Product, and Inventory Services are implemented, containerized, and verified with PostgreSQL/security/concurrency integration tests. Automatic profile provisioning, Gateway routing, and the connected order workflow remain planned milestones.
 
 ## Project Overview
 
@@ -59,7 +59,7 @@ The complete design and current-state warning are maintained in [System Overview
 | --- | --- | --- |
 | API Gateway | Public routing, correlation IDs, edge security | Planned |
 | Auth Service | Credentials, password hashing, JWT and roles | Implemented |
-| User Service | Customer profiles and addresses | Planned |
+| User Service | Customer profiles and addresses | Implemented |
 | Product Service | Catalog, current prices, filtering and management | Implemented |
 | Inventory Service | Stock, reservations, releases and concurrency | Implemented |
 | Order Service | Orders, immutable item snapshots and saga orchestration | Planned |
@@ -75,9 +75,9 @@ Detailed ownership and prohibited coupling are documented in [Service Boundaries
 | Java 21 | LTS runtime, records, modern language/runtime features | Active |
 | Spring Boot 3.5 | Production application foundation and dependency management | Active |
 | Maven Wrapper | Reproducible builds without global Maven installation | Active |
-| PostgreSQL | Strong relational constraints and transactional service data | Active in Product and Inventory |
-| Flyway | Versioned, reviewable service-owned schema migrations | Active in Product and Inventory |
-| Spring Security and JWT | Auth lifecycle and public JWKS | Active in Auth; enforcement pending Gateway/services |
+| PostgreSQL | Strong relational constraints and transactional service data | Active in Auth, User, Product, and Inventory |
+| Flyway | Versioned, reviewable service-owned schema migrations | Active in Auth, User, Product, and Inventory |
+| Spring Security and JWT | Auth lifecycle, public JWKS, local token validation | Active in Auth and User; Gateway/other services pending |
 | Spring Cloud Gateway | Reactive edge routing without business logic | Planned |
 | Kafka | Durable asynchronous saga communication and notifications | Planned |
 | Testcontainers | Integration tests against real PostgreSQL/Kafka behavior | Active for PostgreSQL |
@@ -95,6 +95,7 @@ Current:
 .
 ├── services/
 │   ├── auth-service/           # Credentials, JWT/JWKS, auth_db, security tests
+│   ├── user-service/           # Profiles, addresses, user_db, ownership tests
 │   ├── product-service/        # Catalog API, product_db, tests, and image
 │   └── inventory-service/      # Stock reservations, inventory_db, concurrency tests
 ├── docs/
@@ -147,13 +148,13 @@ See [Database Architecture](docs/architecture/database-architecture.md) and [ADR
 
 ## Authentication
 
-Planned flow:
+Current and target flow:
 
-1. Auth Service registers credentials and hashes passwords.
-2. Login returns a short-lived JWT access token with subject and roles.
-3. Gateway validates the token for edge routing decisions.
-4. Backend resource services validate the token and enforce their own authorization.
-5. User Service owns profile data; it never stores passwords.
+1. Auth Service registers credentials, hashes passwords, and returns short-lived RS256 JWTs. Implemented.
+2. User Service validates JWTs through public JWKS and derives profile ownership from `sub`. Implemented.
+3. Gateway will validate the token for coarse edge routing decisions. Planned.
+4. Other backend services will validate tokens and enforce their own authorization. Planned.
+5. User Service owns profile data and never stores passwords or credential email.
 
 Signing secrets or private keys will come from environment/runtime secret management and will never be committed.
 
@@ -238,6 +239,28 @@ Build the production-style local image:
 
 ```powershell
 docker build -f services/auth-service/Dockerfile -t ecommerce/auth-service:local .
+```
+
+### User Service
+
+Keep Auth running, then start User's separate PostgreSQL database and the service:
+
+```powershell
+$env:USER_DB_PASSWORD = "<choose-a-local-password>"
+docker run --name ecommerce-user-db --rm -d `
+  -e POSTGRES_DB=user_db `
+  -e POSTGRES_USER=user_app `
+  -e POSTGRES_PASSWORD=$env:USER_DB_PASSWORD `
+  -p 5435:5432 postgres:17.6-alpine
+
+$env:USER_DB_URL = "jdbc:postgresql://localhost:5435/user_db"
+.\mvnw.cmd -pl services/user-service spring-boot:run
+```
+
+User readiness is `http://localhost:8082/actuator/health/readiness`. Its protected API validates Auth JWKS at `http://localhost:8081/.well-known/jwks.json` by default.
+
+```powershell
+docker build -f services/user-service/Dockerfile -t ecommerce/user-service:local .
 ```
 
 ### Product Service
@@ -353,6 +376,19 @@ Auth Service supports:
 | `AUTH_JWT_PRIVATE_KEY_BASE64` | Base64 PKCS#8 RSA private key | Ephemeral outside production; required in production |
 | `AUTH_JWT_PUBLIC_KEY_BASE64` | Base64 X.509 RSA public key | Derived outside production; required in production |
 
+User Service supports:
+
+| Variable | Purpose | Default |
+| --- | --- | --- |
+| `SERVER_PORT` | User Service HTTP port | `8082` |
+| `USER_DB_URL` | User PostgreSQL JDBC URL | `jdbc:postgresql://localhost:5432/user_db` |
+| `USER_DB_USERNAME` | User database user | `user_app` |
+| `USER_DB_PASSWORD` | User database password | Required; no default |
+| `USER_AUTH_ISSUER` | Exact trusted JWT issuer | `http://localhost:8081` |
+| `USER_AUTH_JWKS_URI` | Auth public-key endpoint | `http://localhost:8081/.well-known/jwks.json` |
+| `USER_AUTH_CONNECT_TIMEOUT` | JWKS connection timeout | `PT2S` |
+| `USER_AUTH_READ_TIMEOUT` | JWKS response timeout | `PT2S` |
+
 Kafka and observability variables will be added to `.env.example` with their implementations. A real `.env` file is ignored and never committed.
 
 ## API Examples
@@ -366,6 +402,17 @@ curl -X POST http://localhost:8081/api/v1/auth/register \
 ```
 
 Auth details and refresh/key behavior are documented in [Auth Service](services/auth-service/README.md).
+
+Create or replace the authenticated customer's profile using an Auth access token:
+
+```bash
+curl -X PUT http://localhost:8082/api/v1/users/me \
+  -H "Authorization: Bearer ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"displayName":"Linh Nguyen","phone":"+84901234567"}'
+```
+
+The client cannot supply a user ID; User Service derives it from the verified JWT subject. See [User Service](services/user-service/README.md).
 
 Create a product:
 
@@ -405,7 +452,7 @@ Run every implemented service suite:
 .\mvnw.cmd test
 ```
 
-The Product suite has 18 tests, Inventory has 17 including a real concurrent reservation race, and Auth has 15 covering cryptography and token lifecycle. Each service uses the smallest meaningful combination of unit, controller, repository, integration, security, and Testcontainers tests.
+The Product suite has 18 tests, Inventory has 17 including a real concurrent reservation race, Auth has 15 covering cryptography/token lifecycle, and User has 17 covering resource-server security and ownership. The implemented reactor currently has 67 tests. Each service uses the smallest meaningful combination of unit, controller, repository, integration, security, and Testcontainers tests.
 
 ## Documentation
 
@@ -415,6 +462,7 @@ The Product suite has 18 tests, Inventory has 17 including a real concurrent res
 - [Communication policy](docs/architecture/communication.md)
 - [Security architecture](docs/architecture/security.md)
 - [Authentication flow](docs/flows/authentication-flow.md)
+- [User profile flow](docs/flows/user-profile-flow.md)
 - [Product request flow](docs/flows/product-flow.md)
 - [Inventory reservation flow](docs/flows/inventory-flow.md)
 - [Architecture decisions](docs/decisions/)
@@ -432,8 +480,9 @@ Start with:
 4. [JPA, Flyway, and Local Transactions](docs/learning/04-jpa-flyway-and-local-transactions.md)
 5. [Concurrency and Inventory Reservations](docs/learning/05-concurrency-and-inventory-reservations.md)
 6. [Authentication in Microservices](docs/learning/06-authentication-in-microservices.md)
-7. Read the ADRs and compare their alternatives.
-8. Follow the Auth, Product, and Inventory READMEs from controller to service, domain, repository, migration, and tests.
+7. [Identity and Resource Ownership](docs/learning/07-identity-and-resource-ownership.md)
+8. Read the ADRs and compare their alternatives.
+9. Follow the Auth, User, Product, and Inventory READMEs from controller to service, domain, repository, migration, and tests.
 
 Later notes will reference the exact service, class, endpoint, migration, event, and configuration that implements each concept.
 

@@ -2,7 +2,7 @@
 
 ## Current Scope
 
-Auth Service now implements credential storage, BCrypt, RS256 access tokens, rotating opaque refresh tokens, public JWKS, and CUSTOMER/ADMIN claims. User Service, Gateway enforcement, and backend resource-server policies are added in their own milestones. Until those exist, Product and Inventory management endpoints are not claimed to be publicly secured.
+Auth Service implements credential storage, BCrypt, RS256 access tokens, rotating opaque refresh tokens, public JWKS, and CUSTOMER/ADMIN claims. User Service is the first resource server: it accepts only RS256, validates issuer/signature/expiry through JWKS, requires CUSTOMER/ADMIN, and scopes profile resources to JWT `sub`. Gateway, Product, Inventory, and later services add enforcement in their own milestones; Product and Inventory management endpoints are not yet claimed to be publicly secured.
 
 ## Trust Boundaries
 
@@ -12,9 +12,11 @@ flowchart LR
     Auth -->|credentials + hashed refresh tokens| DB[(auth_db)]
     Auth -->|RS256 access token + opaque refresh token| Client
     Auth -->|public keys only| JWKS[JWKS endpoint]
+    Client -->|bearer token| User[User Service]
     Client -. future bearer token .-> Gateway[API Gateway]
     JWKS -. public key discovery .-> Gateway
-    JWKS -. public key discovery .-> Services[Resource Services]
+    JWKS -->|cached public key| User
+    JWKS -. public key discovery .-> Services[Other Resource Services]
 ```
 
 The private signing key stays inside Auth. Verifiers need only public keys, so compromise of a gateway/backend verification configuration cannot mint tokens. A shared HMAC secret would give every verifier signing power and enlarge the compromise blast radius.
@@ -48,7 +50,7 @@ Never log raw passwords, password hashes, access tokens, refresh tokens, private
 ## Remaining Security Work
 
 - Gateway JWT validation and route authorization.
-- Resource-server validation and method/ownership checks in User, Product, Inventory, and Order.
+- Resource-server validation and method/ownership checks in Product, Inventory, and Order.
 - CORS policy and TLS termination for deployed environments.
 - Rate limiting/credential-stuffing defense at the edge.
 - Production secret/key rotation procedures.

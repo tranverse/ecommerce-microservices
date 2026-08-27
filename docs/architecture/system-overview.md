@@ -8,7 +8,7 @@ The platform supports a customer journey from registration and login through pro
 
 ## Current state
 
-Auth, Product, and Inventory Services are implemented, tested against PostgreSQL, containerized, and documented. Auth currently owns the token lifecycle; User profile provisioning and Gateway/resource-server enforcement are not connected yet. Direct Product-to-Inventory integration is intentionally absent: the future Order workflow will coordinate their independent data through APIs/events. The remaining components in the diagram are target architecture. A component is not considered implemented until its code, tests, runtime configuration, and documentation are present.
+Auth, User, Product, and Inventory Services are implemented, tested against PostgreSQL, containerized, and documented. Auth owns the token lifecycle; User validates Auth JWTs through JWKS and enforces subject-owned `/me` resources. Registration-to-profile auto-provisioning and Gateway/other resource-server enforcement are not connected yet. Direct Product-to-Inventory integration is intentionally absent: the future Order workflow will coordinate their independent data through APIs/events. The remaining components in the diagram are target architecture. A component is not considered implemented until its code, tests, runtime configuration, and documentation are present.
 
 ## Target architecture
 
