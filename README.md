@@ -2,7 +2,7 @@
 
 A production-style Java 21 and Spring Boot 3 e-commerce system built incrementally as both a runnable distributed application and a practical microservices course.
 
-> **Implementation status:** foundation phase. Product Service currently has a verified runnable scaffold under `services/`. Architecture documents describe accepted target decisions; unimplemented capabilities are explicitly marked as planned.
+> **Implementation status:** Product Service is implemented and verified with PostgreSQL integration tests. The remaining services and connected distributed workflow are planned and are added in subsequent milestones.
 
 ## Project Overview
 
@@ -60,7 +60,7 @@ The complete design and current-state warning are maintained in [System Overview
 | API Gateway | Public routing, correlation IDs, edge security | Planned |
 | Auth Service | Credentials, password hashing, JWT and roles | Planned |
 | User Service | Customer profiles and addresses | Planned |
-| Product Service | Catalog, current prices, filtering and management | Scaffolded |
+| Product Service | Catalog, current prices, filtering and management | Implemented |
 | Inventory Service | Stock, reservations, releases and concurrency | Planned |
 | Order Service | Orders, immutable item snapshots and saga orchestration | Planned |
 | Payment Service | Idempotent simulated payments and compensation | Planned |
@@ -75,12 +75,12 @@ Detailed ownership and prohibited coupling are documented in [Service Boundaries
 | Java 21 | LTS runtime, records, modern language/runtime features | Active |
 | Spring Boot 3.5 | Production application foundation and dependency management | Active |
 | Maven Wrapper | Reproducible builds without global Maven installation | Active |
-| PostgreSQL | Strong relational constraints and transactional service data | Planned |
-| Flyway | Versioned, reviewable service-owned schema migrations | Planned |
+| PostgreSQL | Strong relational constraints and transactional service data | Active in Product Service |
+| Flyway | Versioned, reviewable service-owned schema migrations | Active in Product Service |
 | Spring Security and JWT | Authentication and decentralized token validation | Planned |
 | Spring Cloud Gateway | Reactive edge routing without business logic | Planned |
 | Kafka | Durable asynchronous saga communication and notifications | Planned |
-| Testcontainers | Integration tests against real PostgreSQL/Kafka behavior | Planned |
+| Testcontainers | Integration tests against real PostgreSQL/Kafka behavior | Active for PostgreSQL |
 | Resilience4j | Bounded failure handling for justified synchronous calls | Planned |
 | Micrometer/OpenTelemetry | Metrics and distributed traces | Planned |
 | Docker Compose | Reproducible complete local environment | Planned |
@@ -94,10 +94,11 @@ Current:
 ```text
 .
 ├── services/
-│   └── product-service/        # Initial independently runnable service
+│   └── product-service/        # Catalog API, database, tests, and container image
 ├── docs/
 │   ├── architecture/
 │   ├── decisions/
+│   ├── flows/
 │   └── learning/
 ├── pom.xml                     # Current reactor build aggregator
 ├── mvnw
@@ -208,12 +209,12 @@ Sensitive values such as passwords, raw tokens, private keys, and payment detail
 
 ## Running Locally
 
-### Current Product Service scaffold
+### Product Service
 
 Requirements:
 
 - Java 21
-- PowerShell, Command Prompt, or a Unix-compatible shell
+- Docker Desktop (for PostgreSQL/Testcontainers and image builds)
 
 Run tests on Windows:
 
@@ -221,7 +222,18 @@ Run tests on Windows:
 .\mvnw.cmd -pl services/product-service test
 ```
 
-Run the service:
+The tests start disposable PostgreSQL 17.6 instances automatically. To run the service manually, start its database and provide a local password:
+
+```powershell
+$env:PRODUCT_DB_PASSWORD = "<choose-a-local-password>"
+docker run --name ecommerce-product-db --rm -d `
+  -e POSTGRES_DB=product_db `
+  -e POSTGRES_USER=product_app `
+  -e POSTGRES_PASSWORD=$env:PRODUCT_DB_PASSWORD `
+  -p 5432:5432 postgres:17.6-alpine
+```
+
+Then run the service:
 
 ```powershell
 .\mvnw.cmd -pl services/product-service spring-boot:run
@@ -239,6 +251,14 @@ Expected response:
 {"status":"UP"}
 ```
 
+Swagger UI: `http://localhost:8083/swagger-ui.html`.
+
+Build the production-style local image:
+
+```powershell
+docker build -f services/product-service/Dockerfile -t ecommerce/product-service:local .
+```
+
 The final target command will be:
 
 ```text
@@ -249,33 +269,47 @@ It is not documented as working until end-to-end validation passes.
 
 ## Configuration
 
-The Product scaffold supports:
+Product Service supports:
 
 | Variable | Purpose | Default |
 | --- | --- | --- |
 | `SERVER_PORT` | Product Service HTTP port | `8083` |
+| `PRODUCT_DB_URL` | Product PostgreSQL JDBC URL | `jdbc:postgresql://localhost:5432/product_db` |
+| `PRODUCT_DB_USERNAME` | Product database user | `product_app` |
+| `PRODUCT_DB_PASSWORD` | Product database password | Required; no default |
+| `PRODUCT_DB_POOL_SIZE` | Maximum database pool size | `10` |
+| `PRODUCT_DB_MIN_IDLE` | Minimum idle connections | `2` |
 
-Database, Kafka, JWT, and observability variables will be added to `.env.example` with their implementations. A real `.env` file is ignored and never committed.
+Kafka, JWT, and observability variables will be added to `.env.example` with their implementations. A real `.env` file is ignored and never committed.
 
 ## API Examples
 
-Only the Actuator endpoint exists today:
+Create a product:
 
-```http
-GET /actuator/health
+```bash
+curl -i -X POST http://localhost:8083/api/v1/products \
+  -H "Content-Type: application/json" \
+  -H "X-Correlation-ID: readme-demo" \
+  -d '{"sku":"LAPTOP-001","name":"Developer Laptop","description":"Development workstation","price":1499.00,"currency":"USD","status":"ACTIVE"}'
 ```
 
-Product, authentication, inventory, and order examples will be added only when their endpoints are executable.
+Search the catalog:
+
+```bash
+curl "http://localhost:8083/api/v1/products?query=laptop&status=ACTIVE&page=0&size=20&sortBy=price&direction=ASC"
+```
+
+Product details and the stable error contract are documented in [Product Service](services/product-service/README.md). Authentication, inventory, and order examples will be added only when those endpoints are executable.
 
 ## Testing
 
-Current test suite:
+Current Product Service suite:
 
 ```powershell
 .\mvnw.cmd -pl services/product-service test
 ```
 
-Each service will add the smallest meaningful combination of unit, controller, repository, integration, and Testcontainers tests. Coverage percentage is not the goal; behavior, edge cases, migrations, queries, concurrency, security, idempotency, and compensation are.
+The current 18 tests include domain/service unit behavior, MVC validation/error contracts, JPA repository behavior, two Flyway migrations, and a full HTTP create/read/update/stale-version flow on PostgreSQL. Each service will add the smallest meaningful combination of unit, controller, repository, integration, and Testcontainers tests. Coverage percentage is not the goal; behavior, edge cases, migrations, queries, concurrency, security, idempotency, and compensation are.
 
 ## Documentation
 
@@ -283,6 +317,7 @@ Each service will add the smallest meaningful combination of unit, controller, r
 - [Service boundaries](docs/architecture/service-boundaries.md)
 - [Database architecture](docs/architecture/database-architecture.md)
 - [Communication policy](docs/architecture/communication.md)
+- [Product request flow](docs/flows/product-flow.md)
 - [Architecture decisions](docs/decisions/)
 - [Learning notes](docs/learning/)
 
@@ -295,8 +330,9 @@ Start with:
 1. [Monolith vs Microservices](docs/learning/01-monolith-vs-microservices.md)
 2. [Service Boundaries](docs/learning/02-service-boundaries.md)
 3. [Database per Service](docs/learning/03-database-per-service.md)
-4. Read the three ADRs and compare their alternatives.
-5. Inspect `services/product-service/pom.xml`, its application entry point, configuration, and context test.
+4. [JPA, Flyway, and Local Transactions](docs/learning/04-jpa-flyway-and-local-transactions.md)
+5. Read the three ADRs and compare their alternatives.
+6. Follow [Product Service](services/product-service/README.md) from controller to service, domain, repository, migration, and tests.
 
 Later notes will reference the exact service, class, endpoint, migration, event, and configuration that implements each concept.
 
