@@ -1,0 +1,9 @@
+auth:
+  jwt:
+    require-configured-key: true
+
+springdoc:
+  api-docs:
+    enabled: false
+  swagger-ui:
+    enabled: false

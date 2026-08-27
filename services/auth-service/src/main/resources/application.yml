@@ -1,0 +1,58 @@
+spring:
+  application:
+    name: auth-service
+  datasource:
+    url: ${AUTH_DB_URL:jdbc:postgresql://localhost:5432/auth_db}
+    username: ${AUTH_DB_USERNAME:auth_app}
+    password: ${AUTH_DB_PASSWORD}
+    hikari:
+      maximum-pool-size: ${AUTH_DB_POOL_SIZE:10}
+      minimum-idle: ${AUTH_DB_MIN_IDLE:2}
+      connection-timeout: 3000
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+  lifecycle:
+    timeout-per-shutdown-phase: 20s
+
+auth:
+  jwt:
+    issuer: ${AUTH_JWT_ISSUER:http://localhost:8081}
+    access-token-ttl: ${AUTH_JWT_ACCESS_TOKEN_TTL:PT15M}
+    refresh-token-ttl: ${AUTH_JWT_REFRESH_TOKEN_TTL:P30D}
+    key-id: ${AUTH_JWT_KEY_ID:ecommerce-local-key}
+    private-key-base64: ${AUTH_JWT_PRIVATE_KEY_BASE64:}
+    public-key-base64: ${AUTH_JWT_PUBLIC_KEY_BASE64:}
+    require-configured-key: ${AUTH_JWT_REQUIRE_CONFIGURED_KEY:false}
+
+server:
+  port: ${SERVER_PORT:8081}
+  shutdown: graceful
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: never
+  health:
+    probes:
+      enabled: true
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+
+logging:
+  pattern:
+    level: "%5p [${spring.application.name:unknown},%X{correlationId:-}]"
