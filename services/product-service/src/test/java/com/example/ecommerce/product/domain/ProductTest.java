@@ -16,12 +16,14 @@ class ProductTest {
                 "  Developer Laptop ",
                 "  A fast laptop  ",
                 new BigDecimal("1499.00"),
+                " usd ",
                 ProductStatus.DRAFT
         );
 
         assertThat(product.getSku()).isEqualTo("LAPTOP-001");
         assertThat(product.getName()).isEqualTo("Developer Laptop");
         assertThat(product.getDescription()).isEqualTo("A fast laptop");
+        assertThat(product.getCurrency()).isEqualTo("USD");
         assertThat(product.getStatus()).isEqualTo(ProductStatus.DRAFT);
     }
 
@@ -32,6 +34,7 @@ class ProductTest {
                 "Developer Laptop",
                 null,
                 BigDecimal.ZERO,
+                "USD",
                 ProductStatus.DRAFT
         )).withMessage("price must be greater than zero");
     }
@@ -43,9 +46,22 @@ class ProductTest {
                 "Developer Laptop",
                 "   ",
                 new BigDecimal("1499.00"),
+                "USD",
                 ProductStatus.DRAFT
         );
 
         assertThat(product.getDescription()).isNull();
+    }
+
+    @Test
+    void rejectsUnsupportedCurrency() {
+        assertThatIllegalArgumentException().isThrownBy(() -> Product.create(
+                "LAPTOP-001",
+                "Developer Laptop",
+                null,
+                new BigDecimal("1499.00"),
+                "ZZZ",
+                ProductStatus.DRAFT
+        ));
     }
 }

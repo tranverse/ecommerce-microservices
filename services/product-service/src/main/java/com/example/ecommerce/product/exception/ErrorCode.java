@@ -1,0 +1,14 @@
+package com.example.ecommerce.product.exception;
+
+public enum ErrorCode {
+    PRODUCT_NOT_FOUND,
+    PRODUCT_SKU_CONFLICT,
+    PRODUCT_VERSION_CONFLICT,
+    INVALID_PRICE_RANGE,
+    INVALID_SORT_FIELD,
+    VALIDATION_ERROR,
+    MALFORMED_REQUEST,
+    DATA_INTEGRITY_CONFLICT,
+    ENDPOINT_NOT_FOUND,
+    INTERNAL_ERROR
+}

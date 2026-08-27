@@ -75,6 +75,6 @@ class ProductRepositoryTest {
     }
 
     private Product product(String sku, String name, String price, ProductStatus status) {
-        return Product.create(sku, name, null, new BigDecimal(price), status);
+        return Product.create(sku, name, null, new BigDecimal(price), "USD", status);
     }
 }

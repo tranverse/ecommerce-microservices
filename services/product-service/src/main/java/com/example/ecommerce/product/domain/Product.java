@@ -16,6 +16,7 @@ import org.springframework.data.jpa.domain.support.AuditingEntityListener;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.Currency;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.UUID;
@@ -42,6 +43,9 @@ public class Product {
     @Column(nullable = false, precision = 19, scale = 2)
     private BigDecimal price;
 
+    @Column(nullable = false, length = 3)
+    private String currency;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
     private ProductStatus status;
@@ -61,11 +65,19 @@ public class Product {
     protected Product() {
     }
 
-    private Product(String sku, String name, String description, BigDecimal price, ProductStatus status) {
+    private Product(
+            String sku,
+            String name,
+            String description,
+            BigDecimal price,
+            String currency,
+            ProductStatus status
+    ) {
         this.sku = normalizeSku(sku);
         this.name = requireText(name, "name");
         this.description = normalizeDescription(description);
         this.price = requirePositivePrice(price);
+        this.currency = normalizeCurrency(currency);
         this.status = Objects.requireNonNull(status, "status must not be null");
     }
 
@@ -74,15 +86,23 @@ public class Product {
             String name,
             String description,
             BigDecimal price,
+            String currency,
             ProductStatus status
     ) {
-        return new Product(sku, name, description, price, status);
+        return new Product(sku, name, description, price, currency, status);
     }
 
-    public void updateDetails(String name, String description, BigDecimal price, ProductStatus status) {
+    public void updateDetails(
+            String name,
+            String description,
+            BigDecimal price,
+            String currency,
+            ProductStatus status
+    ) {
         this.name = requireText(name, "name");
         this.description = normalizeDescription(description);
         this.price = requirePositivePrice(price);
+        this.currency = normalizeCurrency(currency);
         this.status = Objects.requireNonNull(status, "status must not be null");
     }
 
@@ -109,7 +129,16 @@ public class Product {
         if (price.signum() <= 0) {
             throw new IllegalArgumentException("price must be greater than zero");
         }
+        if (price.stripTrailingZeros().scale() > 2) {
+            throw new IllegalArgumentException("price must have at most two decimal places");
+        }
         return price;
+    }
+
+    private static String normalizeCurrency(String currency) {
+        String currencyCode = requireText(currency, "currency").toUpperCase(Locale.ROOT);
+        Currency.getInstance(currencyCode);
+        return currencyCode;
     }
 
     public UUID getId() {
@@ -130,6 +159,10 @@ public class Product {
 
     public BigDecimal getPrice() {
         return price;
+    }
+
+    public String getCurrency() {
+        return currency;
     }
 
     public ProductStatus getStatus() {

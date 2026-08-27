@@ -38,3 +38,11 @@ management:
   health:
     probes:
       enabled: true
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+
+logging:
+  pattern:
+    level: "%5p [${spring.application.name:unknown},%X{correlationId:-}]"
