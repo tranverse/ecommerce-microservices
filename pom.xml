@@ -26,5 +26,6 @@
 
     <modules>
         <module>services/product-service</module>
+        <module>services/inventory-service</module>
     </modules>
 </project>
