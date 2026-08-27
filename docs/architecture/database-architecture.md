@@ -1,6 +1,6 @@
 # Database Architecture
 
-Status: **Accepted; databases will be introduced with their owning services.**
+Status: **Accepted; `auth_db`, `user_db`, `product_db`, and `inventory_db` are implemented. Remaining databases arrive with their owners.**
 
 ## Database-per-service
 

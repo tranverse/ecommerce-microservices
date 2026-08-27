@@ -1,0 +1,15 @@
+package com.example.ecommerce.user.exception;
+
+public enum ErrorCode {
+    PROFILE_NOT_FOUND,
+    ADDRESS_NOT_FOUND,
+    INVALID_IDENTITY,
+    VALIDATION_ERROR,
+    MALFORMED_REQUEST,
+    UNAUTHORIZED,
+    FORBIDDEN,
+    PROFILE_VERSION_CONFLICT,
+    DATA_INTEGRITY_CONFLICT,
+    ENDPOINT_NOT_FOUND,
+    INTERNAL_ERROR
+}
