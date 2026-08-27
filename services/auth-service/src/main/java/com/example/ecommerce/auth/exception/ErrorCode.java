@@ -1,0 +1,14 @@
+package com.example.ecommerce.auth.exception;
+
+public enum ErrorCode {
+    VALIDATION_ERROR,
+    MALFORMED_REQUEST,
+    EMAIL_ALREADY_REGISTERED,
+    INVALID_CREDENTIALS,
+    INVALID_REFRESH_TOKEN,
+    DATA_INTEGRITY_CONFLICT,
+    UNAUTHORIZED,
+    FORBIDDEN,
+    ENDPOINT_NOT_FOUND,
+    INTERNAL_ERROR
+}
