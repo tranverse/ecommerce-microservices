@@ -8,7 +8,7 @@ The platform supports a customer journey from registration and login through pro
 
 ## Current state
 
-API Gateway, Auth, User, Product, and Inventory Services are implemented, containerized, tested, and documented. Gateway is the public edge for those routes, validates Auth JWTs, applies coarse roles, propagates correlation IDs, strips spoofed identity headers, and uses bounded downstream/JWKS timeouts. Auth owns the token lifecycle; User validates Auth JWTs again and enforces subject-owned `/me` resources. Product and Inventory management APIs still need their own resource-server enforcement before direct exposure is safe. Registration-to-profile auto-provisioning and the Order workflow are not connected yet. Direct Product-to-Inventory integration is intentionally absent: Order will coordinate their independent data through APIs/events. The remaining components in the diagram are target architecture. A component is not considered implemented until its code, tests, runtime configuration, and documentation are present.
+API Gateway, Auth, User, Product, Inventory, and the synchronous acceptance phase of Order Service are implemented, containerized, tested, and documented. Gateway routes Order traffic and applies coarse roles; Order validates Auth JWTs again, scopes data to `sub`, obtains trusted Product snapshots through one bounded batch call, and commits only to `order_db`. New orders remain `PENDING`; Kafka inventory/payment saga progression is not implemented yet. Product and Inventory management APIs still need their own resource-server enforcement before direct exposure is safe. Registration-to-profile auto-provisioning is also pending. The remaining components and asynchronous links in the diagram are target architecture. A component is not considered implemented until its code, tests, runtime configuration, and documentation are present.
 
 ## Target architecture
 
@@ -81,9 +81,9 @@ sequenceDiagram
     G->>O: Authenticated request + correlation ID
     O->>P: Fetch active products and trusted prices
     P-->>O: Product snapshots
-    O->>O: Save PENDING order + outbox command
+    O->>O: Save PENDING order snapshots (implemented)
     O-->>Client: 202 Accepted
-    O->>K: InventoryReservationRequested
+    O-->>K: InventoryReservationRequested (future outbox)
     K->>I: Reserve inventory
     I->>K: InventoryReserved or InventoryReservationFailed
     K->>O: Reservation result
@@ -95,7 +95,7 @@ sequenceDiagram
     K->>N: Customer notification event
 ```
 
-The flow is eventually consistent. A local `@Transactional` method cannot atomically update Order, Inventory, and Payment databases. The saga records progress and emits compensating commands when a later step fails.
+Synchronous acceptance through `202` is implemented. The later flow is eventually consistent and remains pending. A local `@Transactional` method cannot atomically update Order, Inventory, and Payment databases; the saga will record progress and emit compensating commands when a later step fails.
 
 ## Deployment view
 

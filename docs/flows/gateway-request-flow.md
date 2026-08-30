@@ -37,6 +37,20 @@ Product -> Gateway -> Client: response
 
 Product reads are public at the edge. Product mutations require `ADMIN`. Product Service will gain its own resource-server authorization in a later security milestone; until then, its management API should not be exposed directly outside the controlled local network.
 
+## Protected Order Request
+
+```text
+Client -> Gateway: POST /api/v1/orders + JWT + Idempotency-Key
+Gateway: verify CUSTOMER/ADMIN; relay JWT and correlation ID
+Gateway -> Order: same request
+Order: verify JWT again; derive customer UUID from sub
+Order -> Product: direct internal batch lookup (Gateway is bypassed)
+Order -> order_db: commit PENDING order and immutable snapshots
+Order -> Gateway -> Client: 202 Accepted
+```
+
+Gateway does not retry this POST and does not decide product validity, idempotency conflicts, ownership, totals, or order state. Those rules stay in Order Service. The detailed dependency/failure flow is documented in [Order Creation Flow](order-creation-flow.md).
+
 ## Rejection Before Routing
 
 ```mermaid

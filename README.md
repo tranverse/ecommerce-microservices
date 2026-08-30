@@ -2,7 +2,7 @@
 
 A production-style Java 21 and Spring Boot 3 e-commerce system built incrementally as both a runnable distributed application and a practical microservices course.
 
-> **Implementation status:** API Gateway, Auth, User, Product, and Inventory Services are implemented, containerized, and verified with routing/security/PostgreSQL/concurrency tests. Automatic profile provisioning and the connected order workflow remain planned milestones.
+> **Implementation status:** API Gateway, Auth, User, Product, Inventory, and the synchronous acceptance phase of Order Service are implemented, containerized, and verified. Kafka-based inventory/payment saga progression, automatic profile provisioning, Payment, and Notification remain planned milestones.
 
 ## Project Overview
 
@@ -62,7 +62,7 @@ The complete design and current-state warning are maintained in [System Overview
 | User Service | Customer profiles and addresses | Implemented |
 | Product Service | Catalog, current prices, filtering and management | Implemented |
 | Inventory Service | Stock, reservations, releases and concurrency | Implemented |
-| Order Service | Orders, immutable item snapshots and saga orchestration | Planned |
+| Order Service | Authenticated orders, immutable item snapshots and saga orchestration | Acceptance implemented; async saga pending |
 | Payment Service | Idempotent simulated payments and compensation | Planned |
 | Notification Service | Asynchronous notification history and delivery simulation | Planned |
 
@@ -75,9 +75,9 @@ Detailed ownership and prohibited coupling are documented in [Service Boundaries
 | Java 21 | LTS runtime, records, modern language/runtime features | Active |
 | Spring Boot 3.5 | Production application foundation and dependency management | Active |
 | Maven Wrapper | Reproducible builds without global Maven installation | Active |
-| PostgreSQL | Strong relational constraints and transactional service data | Active in Auth, User, Product, and Inventory |
-| Flyway | Versioned, reviewable service-owned schema migrations | Active in Auth, User, Product, and Inventory |
-| Spring Security and JWT | Auth lifecycle, public JWKS, local token validation | Active in Auth, User, and Gateway; other services pending |
+| PostgreSQL | Strong relational constraints and transactional service data | Active in Auth, User, Product, Inventory, and Order |
+| Flyway | Versioned, reviewable service-owned schema migrations | Active in Auth, User, Product, Inventory, and Order |
+| Spring Security and JWT | Auth lifecycle, public JWKS, local token validation | Active in Auth, User, Order, and Gateway; other services pending |
 | Spring Cloud Gateway | Reactive edge routing without business logic | Active |
 | Kafka | Durable asynchronous saga communication and notifications | Planned |
 | Testcontainers | Integration tests against real PostgreSQL/Kafka behavior | Active for PostgreSQL |
@@ -98,7 +98,8 @@ Current:
 │   ├── auth-service/           # Credentials, JWT/JWKS, auth_db, security tests
 │   ├── user-service/           # Profiles, addresses, user_db, ownership tests
 │   ├── product-service/        # Catalog API, product_db, tests, and image
-│   └── inventory-service/      # Stock reservations, inventory_db, concurrency tests
+│   ├── inventory-service/      # Stock reservations, inventory_db, concurrency tests
+│   └── order-service/          # Authenticated acceptance, snapshots, order_db, state machine
 ├── docs/
 │   ├── architecture/
 │   ├── decisions/
@@ -154,8 +155,9 @@ Current and target flow:
 1. Auth Service registers credentials, hashes passwords, and returns short-lived RS256 JWTs. Implemented.
 2. User Service validates JWTs through public JWKS and derives profile ownership from `sub`. Implemented.
 3. Gateway validates the token for coarse edge routing decisions. Implemented.
-4. Other backend services will validate tokens and enforce their own authorization. Planned.
-5. User Service owns profile data and never stores passwords or credential email.
+4. Order Service independently validates tokens and scopes orders to JWT `sub`. Implemented.
+5. Other protected backend services will add their own enforcement in their milestones. Planned.
+6. User Service owns profile data and never stores passwords or credential email.
 
 Signing secrets or private keys will come from environment/runtime secret management and will never be committed.
 
@@ -183,7 +185,7 @@ Messages will include event identity, version, timestamp, aggregate ID, and corr
 
 ## Order Workflow
 
-The order endpoint will validate products synchronously, save a `PENDING` order with immutable item snapshots, and return `202 Accepted`. Inventory and payment then advance the order asynchronously. Clients query the order resource to observe the final outcome.
+The order endpoint now validates products synchronously through one bounded batch call, saves a `PENDING` order with immutable item snapshots, and returns `202 Accepted`. Customer-scoped idempotency makes ambiguous client retries safe. Inventory and payment will advance the order asynchronously in the next Kafka/saga phase. See [Order Service](services/order-service/README.md) and [Order Creation Flow](docs/flows/order-creation-flow.md).
 
 ## Saga
 
@@ -347,6 +349,28 @@ Inventory readiness is `http://localhost:8084/actuator/health/readiness`; Swagge
 docker build -f services/inventory-service/Dockerfile -t ecommerce/inventory-service:local .
 ```
 
+### Order Service
+
+Keep Auth and Product running, start a separate PostgreSQL database, then run Order:
+
+```powershell
+$env:ORDER_DB_PASSWORD = "<choose-a-local-password>"
+$env:ORDER_DB_URL = "jdbc:postgresql://localhost:5436/order_db"
+docker run --name ecommerce-order-db --rm -d `
+  -e POSTGRES_DB=order_db `
+  -e POSTGRES_USER=order_app `
+  -e POSTGRES_PASSWORD=$env:ORDER_DB_PASSWORD `
+  -p 5436:5432 postgres:17.6-alpine
+
+.\mvnw.cmd -pl services/order-service spring-boot:run
+```
+
+Order readiness is `http://localhost:8085/actuator/health/readiness`; Swagger UI is `http://localhost:8085/swagger-ui.html`.
+
+```powershell
+docker build -f services/order-service/Dockerfile -t ecommerce/order-service:local .
+```
+
 The final target command will be:
 
 ```text
@@ -417,7 +441,21 @@ API Gateway supports:
 | `GATEWAY_JWKS_READ_TIMEOUT` | JWKS response timeout | `PT2S` |
 | `GATEWAY_CONNECT_TIMEOUT_MS` | Downstream connection timeout in milliseconds | `2000` |
 | `GATEWAY_RESPONSE_TIMEOUT` | Downstream response timeout | `5s` |
-| `*_SERVICE_URL` | Auth/User/Product/Inventory route destinations | Service-specific localhost URL |
+| `*_SERVICE_URL` | Auth/User/Product/Inventory/Order route destinations | Service-specific localhost URL |
+
+Order Service supports:
+
+| Variable | Purpose | Default |
+| --- | --- | --- |
+| `SERVER_PORT` | Order Service HTTP port | `8085` |
+| `ORDER_DB_URL` | Order PostgreSQL JDBC URL | `jdbc:postgresql://localhost:5432/order_db` |
+| `ORDER_DB_USERNAME` | Order database user | `order_app` |
+| `ORDER_DB_PASSWORD` | Order database password | Required; no default |
+| `ORDER_AUTH_ISSUER` | Exact trusted JWT issuer | `http://localhost:8081` |
+| `ORDER_AUTH_JWKS_URI` | Auth public-key endpoint | `http://localhost:8081/.well-known/jwks.json` |
+| `ORDER_PRODUCT_SERVICE_URL` | Direct internal Product endpoint | `http://localhost:8083` |
+| `ORDER_PRODUCT_CONNECT_TIMEOUT` | Product connection timeout | `PT2S` |
+| `ORDER_PRODUCT_READ_TIMEOUT` | Product response timeout | `PT3S` |
 
 Kafka and observability variables will be added to `.env.example` with their implementations. A real `.env` file is ignored and never committed.
 
@@ -460,7 +498,19 @@ Search the catalog:
 curl "http://localhost:8080/api/v1/products?query=laptop&status=ACTIVE&page=0&size=20&sortBy=price&direction=ASC"
 ```
 
-Product details and the stable error contract are documented in [Product Service](services/product-service/README.md). Order examples will be added only when those endpoints are executable.
+Product details and the stable error contract are documented in [Product Service](services/product-service/README.md).
+
+Create an idempotent order using a customer access token:
+
+```bash
+curl -i -X POST http://localhost:8080/api/v1/orders \
+  -H "Authorization: Bearer CUSTOMER_ACCESS_TOKEN" \
+  -H "Idempotency-Key: checkout-request-001" \
+  -H "Content-Type: application/json" \
+  -d '{"items":[{"productId":"PRODUCT_UUID","quantity":2}]}'
+```
+
+The response is `202 Accepted` with a `PENDING` order and trusted product snapshots. Reuse the same key only for the same logical request.
 
 Create stock using a Product Service UUID, then reserve it for an Order UUID:
 
@@ -485,7 +535,7 @@ Run every implemented service suite:
 .\mvnw.cmd test
 ```
 
-The Product suite has 18 tests, Inventory has 17 including a real concurrent reservation race, Auth has 15 covering cryptography/token lifecycle, User has 17 covering resource-server security and ownership, and Gateway has 8 covering routing, edge authorization, header hygiene, token relay, and correlation IDs. The implemented reactor currently has 75 tests. Each service uses the smallest meaningful combination of unit, controller, repository, integration, security, proxy, and Testcontainers tests.
+Product has 20 tests, Inventory has 17 including a real concurrent reservation race, Auth has 15 covering cryptography/token lifecycle, User has 17 covering resource-server security and ownership, Gateway has 9 covering routing and edge behavior, and Order has 22 covering its aggregate, HTTP client, security, idempotency, ownership, and PostgreSQL transaction behavior. The implemented reactor currently has 100 tests. Each service uses the smallest meaningful combination of unit, controller, repository, integration, security, proxy, and Testcontainers tests.
 
 ## Documentation
 
@@ -499,6 +549,7 @@ The Product suite has 18 tests, Inventory has 17 including a real concurrent res
 - [API Gateway request flow](docs/flows/gateway-request-flow.md)
 - [Product request flow](docs/flows/product-flow.md)
 - [Inventory reservation flow](docs/flows/inventory-flow.md)
+- [Order creation flow](docs/flows/order-creation-flow.md)
 - [Architecture decisions](docs/decisions/)
 - [Learning notes](docs/learning/)
 
@@ -516,8 +567,9 @@ Start with:
 6. [Authentication in Microservices](docs/learning/06-authentication-in-microservices.md)
 7. [Identity and Resource Ownership](docs/learning/07-identity-and-resource-ownership.md)
 8. [API Gateway and Edge Security](docs/learning/08-api-gateway-and-edge-security.md)
-9. Read the ADRs and compare their alternatives.
-10. Follow the Gateway, Auth, User, Product, and Inventory READMEs from edge filter/controller to service, domain, repository, migration, and tests.
+9. [Synchronous Communication, Transaction Boundaries, and Idempotency](docs/learning/09-synchronous-communication-and-idempotency.md)
+10. Read the ADRs and compare their alternatives.
+11. Follow the Gateway, Auth, User, Product, Inventory, and Order READMEs from edge filter/controller to service, domain, repository, migration, and tests.
 
 Later notes will reference the exact service, class, endpoint, migration, event, and configuration that implements each concept.
 
