@@ -1,0 +1,258 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/ecommerce/contracts/events/v1/order-saga-events.schema.json",
+  "title": "E-Commerce Order Saga Events v1",
+  "oneOf": [
+    { "$ref": "#/$defs/inventoryReservationRequested" },
+    { "$ref": "#/$defs/inventoryReserved" },
+    { "$ref": "#/$defs/inventoryReservationFailed" },
+    { "$ref": "#/$defs/paymentRequested" },
+    { "$ref": "#/$defs/paymentCompleted" },
+    { "$ref": "#/$defs/paymentFailed" },
+    { "$ref": "#/$defs/inventoryReleaseRequested" },
+    { "$ref": "#/$defs/inventoryConfirmationRequested" },
+    { "$ref": "#/$defs/orderConfirmed" },
+    { "$ref": "#/$defs/orderCancelled" }
+  ],
+  "$defs": {
+    "uuid": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "metadata": {
+      "type": "object",
+      "required": [
+        "eventId",
+        "eventType",
+        "eventVersion",
+        "occurredAt",
+        "correlationId",
+        "aggregateId",
+        "payload"
+      ],
+      "properties": {
+        "eventId": { "$ref": "#/$defs/uuid" },
+        "eventType": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "eventVersion": { "const": 1 },
+        "occurredAt": { "type": "string", "format": "date-time" },
+        "correlationId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._:-]{1,128}$"
+        },
+        "aggregateId": { "$ref": "#/$defs/uuid" },
+        "payload": { "type": "object" }
+      },
+      "additionalProperties": false
+    },
+    "reservationItem": {
+      "type": "object",
+      "required": ["productId", "quantity"],
+      "properties": {
+        "productId": { "$ref": "#/$defs/uuid" },
+        "quantity": { "type": "integer", "minimum": 1, "maximum": 999 }
+      },
+      "additionalProperties": false
+    },
+    "inventoryReservationRequested": {
+      "allOf": [
+        { "$ref": "#/$defs/metadata" },
+        {
+          "properties": {
+            "eventType": { "const": "InventoryReservationRequested" },
+            "payload": {
+              "type": "object",
+              "required": ["orderId", "items"],
+              "properties": {
+                "orderId": { "$ref": "#/$defs/uuid" },
+                "items": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 50,
+                  "items": { "$ref": "#/$defs/reservationItem" }
+                }
+              },
+              "additionalProperties": false
+            }
+          }
+        }
+      ]
+    },
+    "inventoryReserved": {
+      "allOf": [
+        { "$ref": "#/$defs/metadata" },
+        {
+          "properties": {
+            "eventType": { "const": "InventoryReserved" },
+            "payload": {
+              "type": "object",
+              "required": ["orderId", "reservationId"],
+              "properties": {
+                "orderId": { "$ref": "#/$defs/uuid" },
+                "reservationId": { "$ref": "#/$defs/uuid" }
+              },
+              "additionalProperties": false
+            }
+          }
+        }
+      ]
+    },
+    "inventoryReservationFailed": {
+      "allOf": [
+        { "$ref": "#/$defs/metadata" },
+        {
+          "properties": {
+            "eventType": { "const": "InventoryReservationFailed" },
+            "payload": {
+              "type": "object",
+              "required": ["orderId", "reason"],
+              "properties": {
+                "orderId": { "$ref": "#/$defs/uuid" },
+                "reason": {
+                  "enum": ["INSUFFICIENT_INVENTORY", "ITEM_NOT_FOUND", "REQUEST_CONFLICT"]
+                }
+              },
+              "additionalProperties": false
+            }
+          }
+        }
+      ]
+    },
+    "paymentRequested": {
+      "allOf": [
+        { "$ref": "#/$defs/metadata" },
+        {
+          "properties": {
+            "eventType": { "const": "PaymentRequested" },
+            "payload": {
+              "type": "object",
+              "required": ["orderId", "amount", "currency"],
+              "properties": {
+                "orderId": { "$ref": "#/$defs/uuid" },
+                "amount": { "type": "number", "exclusiveMinimum": 0, "multipleOf": 0.01 },
+                "currency": { "type": "string", "pattern": "^[A-Z]{3}$" }
+              },
+              "additionalProperties": false
+            }
+          }
+        }
+      ]
+    },
+    "paymentCompleted": {
+      "allOf": [
+        { "$ref": "#/$defs/metadata" },
+        {
+          "properties": {
+            "eventType": { "const": "PaymentCompleted" },
+            "payload": {
+              "type": "object",
+              "required": ["orderId", "paymentId"],
+              "properties": {
+                "orderId": { "$ref": "#/$defs/uuid" },
+                "paymentId": { "$ref": "#/$defs/uuid" }
+              },
+              "additionalProperties": false
+            }
+          }
+        }
+      ]
+    },
+    "paymentFailed": {
+      "allOf": [
+        { "$ref": "#/$defs/metadata" },
+        {
+          "properties": {
+            "eventType": { "const": "PaymentFailed" },
+            "payload": {
+              "type": "object",
+              "required": ["orderId", "paymentId", "reason"],
+              "properties": {
+                "orderId": { "$ref": "#/$defs/uuid" },
+                "paymentId": { "$ref": "#/$defs/uuid" },
+                "reason": { "const": "DECLINED" }
+              },
+              "additionalProperties": false
+            }
+          }
+        }
+      ]
+    },
+    "inventoryReleaseRequested": {
+      "allOf": [
+        { "$ref": "#/$defs/metadata" },
+        {
+          "properties": {
+            "eventType": { "const": "InventoryReleaseRequested" },
+            "payload": {
+              "type": "object",
+              "required": ["orderId"],
+              "properties": { "orderId": { "$ref": "#/$defs/uuid" } },
+              "additionalProperties": false
+            }
+          }
+        }
+      ]
+    },
+    "inventoryConfirmationRequested": {
+      "allOf": [
+        { "$ref": "#/$defs/metadata" },
+        {
+          "properties": {
+            "eventType": { "const": "InventoryConfirmationRequested" },
+            "payload": {
+              "type": "object",
+              "required": ["orderId"],
+              "properties": { "orderId": { "$ref": "#/$defs/uuid" } },
+              "additionalProperties": false
+            }
+          }
+        }
+      ]
+    },
+    "orderConfirmed": {
+      "allOf": [
+        { "$ref": "#/$defs/metadata" },
+        {
+          "properties": {
+            "eventType": { "const": "OrderConfirmed" },
+            "payload": {
+              "type": "object",
+              "required": ["orderId", "customerId"],
+              "properties": {
+                "orderId": { "$ref": "#/$defs/uuid" },
+                "customerId": { "$ref": "#/$defs/uuid" }
+              },
+              "additionalProperties": false
+            }
+          }
+        }
+      ]
+    },
+    "orderCancelled": {
+      "allOf": [
+        { "$ref": "#/$defs/metadata" },
+        {
+          "properties": {
+            "eventType": { "const": "OrderCancelled" },
+            "payload": {
+              "type": "object",
+              "required": ["orderId", "customerId", "reason"],
+              "properties": {
+                "orderId": { "$ref": "#/$defs/uuid" },
+                "customerId": { "$ref": "#/$defs/uuid" },
+                "reason": {
+                  "enum": [
+                    "INVENTORY_UNAVAILABLE",
+                    "INSUFFICIENT_INVENTORY",
+                    "PAYMENT_FAILED",
+                    "SYSTEM_ERROR"
+                  ]
+                }
+              },
+              "additionalProperties": false
+            }
+          }
+        }
+      ]
+    }
+  }
+}

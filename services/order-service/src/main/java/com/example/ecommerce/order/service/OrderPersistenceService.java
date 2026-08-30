@@ -9,6 +9,8 @@ import com.example.ecommerce.order.exception.IdempotencyKeyConflictException;
 import com.example.ecommerce.order.exception.OrderNotFoundException;
 import com.example.ecommerce.order.mapper.OrderMapper;
 import com.example.ecommerce.order.repository.CustomerOrderRepository;
+import com.example.ecommerce.order.messaging.OrderEventFactory;
+import com.example.ecommerce.order.repository.OutboxEventRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
@@ -27,10 +29,19 @@ public class OrderPersistenceService {
     private static final Logger log = LoggerFactory.getLogger(OrderPersistenceService.class);
 
     private final CustomerOrderRepository repository;
+    private final OutboxEventRepository outboxRepository;
+    private final OrderEventFactory eventFactory;
     private final OrderMapper mapper;
 
-    public OrderPersistenceService(CustomerOrderRepository repository, OrderMapper mapper) {
+    public OrderPersistenceService(
+            CustomerOrderRepository repository,
+            OutboxEventRepository outboxRepository,
+            OrderEventFactory eventFactory,
+            OrderMapper mapper
+    ) {
         this.repository = repository;
+        this.outboxRepository = outboxRepository;
+        this.eventFactory = eventFactory;
         this.mapper = mapper;
     }
 
@@ -62,6 +73,7 @@ public class OrderPersistenceService {
         CustomerOrder saved = repository.saveAndFlush(
                 CustomerOrder.create(customerId, idempotencyKey, requestHash, snapshots)
         );
+        outboxRepository.saveAndFlush(eventFactory.inventoryReservationRequested(saved));
         log.info(
                 "Created order orderId={} customerId={} itemCount={} totalAmount={} currency={}",
                 saved.getId(),

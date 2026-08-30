@@ -8,6 +8,8 @@ import com.example.ecommerce.order.dto.OrderResponse;
 import com.example.ecommerce.order.dto.PageResponse;
 import com.example.ecommerce.order.exception.ApiErrorResponse;
 import com.example.ecommerce.order.repository.CustomerOrderRepository;
+import com.example.ecommerce.order.repository.OutboxEventRepository;
+import com.fasterxml.jackson.databind.JsonNode;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -55,6 +57,9 @@ class OrderApiIntegrationTest {
     @Autowired
     private CustomerOrderRepository repository;
 
+    @Autowired
+    private OutboxEventRepository outboxRepository;
+
     @MockitoBean
     private JwtDecoder jwtDecoder;
 
@@ -63,6 +68,7 @@ class OrderApiIntegrationTest {
 
     @BeforeEach
     void setUp() {
+        outboxRepository.deleteAll();
         repository.deleteAll();
         reset(jwtDecoder, productCatalogClient);
         when(jwtDecoder.decode(USER_ONE_TOKEN)).thenReturn(jwt(USER_ONE_TOKEN, userOne, "CUSTOMER"));
@@ -107,6 +113,21 @@ class OrderApiIntegrationTest {
         assertThat(replayed.getBody()).isNotNull();
         assertThat(replayed.getBody().id()).isEqualTo(created.getBody().id());
         verify(productCatalogClient, times(1)).getProducts(Set.of(productId));
+
+        assertThat(outboxRepository.findAll()).singleElement().satisfies(event -> {
+            assertThat(event.getAggregateId()).isEqualTo(created.getBody().id());
+            assertThat(event.getTopic()).isEqualTo("inventory.commands.v1");
+            assertThat(event.getEventType()).isEqualTo("InventoryReservationRequested");
+            assertThat(event.getEventVersion()).isEqualTo(1);
+            assertThat(event.getEventKey()).isEqualTo(created.getBody().id().toString());
+            assertThat(event.getCorrelationId()).isEqualTo("order-integration-flow");
+            JsonNode envelope = event.getPayload();
+            assertThat(envelope.path("eventId").asText()).isEqualTo(event.getId().toString());
+            assertThat(envelope.path("payload").path("orderId").asText())
+                    .isEqualTo(created.getBody().id().toString());
+            assertThat(envelope.path("payload").path("items").get(0).path("quantity").asInt())
+                    .isEqualTo(2);
+        });
 
         ResponseEntity<ApiErrorResponse> conflictingReplay = exchange(
                 "/api/v1/orders",
@@ -204,4 +225,5 @@ class OrderApiIntegrationTest {
                 .claim("roles", List.of(role))
                 .build();
     }
+
 }
