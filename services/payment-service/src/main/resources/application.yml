@@ -23,6 +23,11 @@ spring:
   lifecycle:
     timeout-per-shutdown-phase: 20s
 
+payment:
+  simulator:
+    decline-payments: ${PAYMENT_SIMULATOR_DECLINE_PAYMENTS:false}
+    unavailable: ${PAYMENT_SIMULATOR_UNAVAILABLE:false}
+
 server:
   port: ${SERVER_PORT:8086}
   shutdown: graceful
