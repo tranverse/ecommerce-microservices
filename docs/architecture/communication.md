@@ -1,6 +1,6 @@
 # Service Communication
 
-Status: **Accepted; Order-to-Product synchronous lookup and Payment's idempotent processor boundary are implemented. Kafka interactions remain target policy.**
+Status: **Accepted; synchronous Product lookup, Order/Inventory Kafka flow, and Payment's idempotent processor boundary are implemented. Remaining Kafka adapters are in progress.**
 
 ## Decision policy
 

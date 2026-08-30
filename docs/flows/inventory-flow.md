@@ -31,7 +31,7 @@ sequenceDiagram
     end
 ```
 
-The transaction is local to `inventory_db`. Order Service will later request this step through Kafka; it will never join this database transaction or modify stock directly.
+The transaction is local to `inventory_db`. Order Service requests this step through Kafka; it never joins this database transaction or modifies stock directly. Inventory commits the reservation, processed input event, and outcome outbox row together.
 
 ## Confirm and Compensation
 
@@ -57,4 +57,4 @@ stateDiagram-v2
 | Changed payload for same order | Existing hold remains unchanged | `409 RESERVATION_CONFLICT` |
 | Concurrent request for last unit | Row lock serializes checks | One succeeds; the other gets `409` |
 
-Every HTTP response returns `X-Correlation-ID`; the same value is present in logging MDC. Kafka events will carry it explicitly when messaging is introduced.
+Every HTTP response returns `X-Correlation-ID`; the same value is present in logging MDC. Kafka commands and events carry it in their versioned envelope, and the listener places it in MDC while processing.

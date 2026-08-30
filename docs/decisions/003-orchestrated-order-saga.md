@@ -1,6 +1,6 @@
 # ADR 003: Use an Orchestrated Saga for Order Processing
 
-Status: **Accepted design; Order acceptance and Payment participant core implemented, asynchronous saga pending**
+Status: **Accepted; Order outbox start and Inventory participant implemented, remaining saga adapters in progress**
 
 ## Context
 

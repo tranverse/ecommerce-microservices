@@ -28,7 +28,7 @@ sequenceDiagram
     else new request
         O->>P: GET product batch (bounded timeout)
         P-->>O: Trusted active product data
-        O->>D: Local transaction: insert order + snapshots
+        O->>D: Local transaction: insert order + snapshots + outbox command
         D-->>O: Committed PENDING order
         O-->>G: 202 + Location
     end
@@ -41,7 +41,8 @@ The Product call is synchronous because Order cannot truthfully accept an order 
 
 ```text
 No DB transaction: validate identity -> idempotency pre-check -> Product HTTP call
-Local DB transaction: re-check key -> insert customer_orders -> insert order_items -> commit
+Local DB transaction: re-check key -> insert customer_orders -> insert order_items
+                      -> insert InventoryReservationRequested outbox -> commit
 ```
 
 The second key check plus database uniqueness handles the race where two identical requests arrive together. PostgreSQL is the final arbiter; an in-memory lock would fail once multiple Order instances run.
@@ -58,6 +59,6 @@ The second key check plus database uniqueness handles the race where two identic
 | Concurrent duplicate insert | Read committed winner | DB unique constraint closes race |
 | Another customer reads order | `404` | Enforce ownership without leaking existence |
 
-## Future Asynchronous Continuation
+## Implemented Asynchronous Start
 
-The accepted `PENDING` order will later write an outbox command in the same local transaction. Kafka will carry inventory/payment saga work. That phase is intentionally absent today: returning `202` represents accepted workflow state, not a false claim that reservation/payment already completed.
+The accepted `PENDING` order writes an outbox command in the same local transaction. A scheduled publisher sends it to `inventory.commands.v1` and marks the row published only after broker acknowledgment. Inventory already consumes the command and publishes an outcome. Returning `202` represents accepted workflow state, not a false claim that reservation/payment already completed; Order outcome handling and Payment progression remain pending.

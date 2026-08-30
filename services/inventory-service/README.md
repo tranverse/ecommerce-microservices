@@ -35,7 +35,21 @@ One reservation can contain up to 100 unique products. `InventoryService.reserve
 
 After all rows are locked, the service checks every line before changing any quantity. If one line is missing or insufficient, the transaction rolls back and no partial reservation remains. This prevents overselling and partial holds.
 
-The `order_id` unique constraint is the idempotency key for this synchronous API. An identical retry returns the existing reservation. Reusing the same order ID with different lines returns `409 RESERVATION_CONFLICT`. Kafka consumer idempotency will later add processed-event records because broker delivery introduces a different duplicate boundary.
+The `order_id` unique constraint is the idempotency key for the synchronous API. An identical retry returns the existing reservation. Reusing the same order ID with different lines returns `409 RESERVATION_CONFLICT`. Kafka delivery has an additional duplicate boundary, so the saga consumer records each input `eventId` in `processed_events`.
+
+## Kafka Saga Participant
+
+Inventory consumes these v1 commands from `inventory.commands.v1`:
+
+- `InventoryReservationRequested`
+- `InventoryReleaseRequested`
+- `InventoryConfirmationRequested`
+
+The Kafka key, envelope `aggregateId`, and payload `orderId` must match. The parser rejects unknown fields, unsupported versions, invalid quantities, duplicate products, and malformed correlation IDs instead of silently accepting contract drift.
+
+For a successful reservation, stock changes, the inbox row, and an `InventoryReserved` outbox row commit in one `inventory_db` transaction. Known business failures roll back the reservation transaction first, then record the inbox row and an `InventoryReservationFailed` outbox row in a new transaction. Technical failures remain retryable and are never reported as business failures.
+
+The scheduled outbox publisher locks due rows with `FOR UPDATE SKIP LOCKED`, waits for the Kafka broker acknowledgment, and then marks them published. A crash after broker acknowledgment but before the database commit can still duplicate a message; consumers must therefore remain idempotent. Invalid events are not retried, while transient failures use bounded exponential retry before publication to `inventory.commands.v1.DLT`.
 
 ## JPA Query Review
 
@@ -52,6 +66,11 @@ The `order_id` unique constraint is the idempotency key for this synchronous API
 | `INVENTORY_DB_USERNAME` | No | `inventory_app` | Database owner/user |
 | `INVENTORY_DB_POOL_SIZE` | No | `10` | Maximum Hikari connections |
 | `INVENTORY_DB_MIN_IDLE` | No | `2` | Minimum idle Hikari connections |
+| `KAFKA_BOOTSTRAP_SERVERS` | No | `localhost:9092` | Kafka broker addresses |
+| `INVENTORY_KAFKA_CONSUMER_GROUP` | No | `inventory-service-v1` | Stable Inventory consumer group |
+| `INVENTORY_COMMANDS_TOPIC` | No | `inventory.commands.v1` | Saga command topic |
+| `SAGA_MESSAGING_LISTENER_ENABLED` | No | `true` | Start the Kafka listener |
+| `OUTBOX_PUBLISHER_ENABLED` | No | `true` | Start the scheduled publisher |
 | `SERVER_PORT` | No | `8084` | HTTP port |
 
 Swagger UI is available at `http://localhost:8084/swagger-ui.html` and OpenAPI at `http://localhost:8084/v3/api-docs`.
@@ -66,4 +85,4 @@ cmd /c mvnw.cmd -pl services/inventory-service package
 docker build -f services/inventory-service/Dockerfile -t ecommerce/inventory-service:local .
 ```
 
-The 17 tests cover domain invariants, application use cases, MVC validation/errors, the full HTTP lifecycle on PostgreSQL 17.6, Flyway/Hibernate schema compatibility, idempotent retry, and concurrent oversell prevention.
+The 28 tests cover domain invariants, application use cases, MVC validation/errors, the full HTTP lifecycle, Flyway/Hibernate schema compatibility, concurrent oversell prevention, strict event parsing, transactional inbox/outbox behavior, duplicate delivery, business failure rollback, and the real Kafka/PostgreSQL command-to-outcome flow.

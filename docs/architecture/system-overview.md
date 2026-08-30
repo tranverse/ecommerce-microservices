@@ -8,7 +8,7 @@ The platform supports a customer journey from registration and login through pro
 
 ## Current state
 
-API Gateway, Auth, User, Product, Inventory, the synchronous acceptance phase of Order, and Payment's core application workflow are implemented, containerized, tested, and documented. Gateway routes Order traffic and applies coarse roles; Order validates Auth JWTs again, scopes data to `sub`, obtains trusted Product snapshots through one bounded batch call, and commits only to `order_db`. Payment independently owns `payment_db`, idempotent charge/refund state, and a simulated processor adapter. New orders remain `PENDING`; the Kafka adapters that connect Inventory, Payment, and Order are not implemented yet. Product and Inventory management APIs still need their own resource-server enforcement before direct exposure is safe. Registration-to-profile auto-provisioning is also pending. The remaining components and asynchronous links in the diagram are target architecture. A component is not considered implemented until its code, tests, runtime configuration, and documentation are present.
+API Gateway, Auth, User, Product, Inventory, Order acceptance, and Payment's core application workflow are implemented, containerized, tested, and documented. Gateway routes Order traffic and applies coarse roles; Order validates Auth JWTs again, scopes data to `sub`, obtains trusted Product snapshots through one bounded batch call, and commits the order plus its first saga command only to `order_db`. Its outbox publishes `InventoryReservationRequested`. Inventory consumes that command idempotently in `inventory_db` and publishes `InventoryReserved` or `InventoryReservationFailed` from its own outbox. Payment independently owns `payment_db`, idempotent charge/refund state, and a simulated processor adapter. New orders remain `PENDING` because Order outcome handling and the Payment Kafka adapter are not implemented yet. Product and Inventory management APIs still need their own resource-server enforcement before direct exposure is safe. Registration-to-profile auto-provisioning is also pending. A component is not considered implemented until its code, tests, runtime configuration, and documentation are present.
 
 ## Target architecture
 
@@ -81,12 +81,12 @@ sequenceDiagram
     G->>O: Authenticated request + correlation ID
     O->>P: Fetch active products and trusted prices
     P-->>O: Product snapshots
-    O->>O: Save PENDING order snapshots (implemented)
+    O->>O: Save PENDING order + inventory outbox (implemented)
     O-->>Client: 202 Accepted
-    O-->>K: InventoryReservationRequested (future outbox)
-    K->>I: Reserve inventory
-    I->>K: InventoryReserved or InventoryReservationFailed
-    K->>O: Reservation result
+    O-->>K: InventoryReservationRequested (implemented)
+    K->>I: Reserve inventory (implemented)
+    I->>K: InventoryReserved or InventoryReservationFailed (implemented)
+    K->>O: Reservation result (adapter pending)
     O->>K: PaymentRequested when reserved
     K->>Pay: Process simulated payment (adapter pending; core ready)
     Pay->>K: PaymentCompleted or PaymentFailed (pending)
@@ -95,7 +95,7 @@ sequenceDiagram
     K->>N: Customer notification event
 ```
 
-Synchronous acceptance through `202` and Payment's local idempotent workflow are implemented. The Kafka-connected flow remains pending. A local `@Transactional` method cannot atomically update Order, Inventory, and Payment databases; the saga will record progress and emit compensating commands when a later step fails.
+Synchronous acceptance through `202`, the durable Order-to-Inventory Kafka step, and Payment's local idempotent workflow are implemented. Order outcome handling and subsequent saga steps remain pending. A local `@Transactional` method cannot atomically update Order, Inventory, and Payment databases; each implemented participant uses a local transaction plus outbox/inbox records.
 
 ## Deployment view
 

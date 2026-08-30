@@ -2,7 +2,7 @@
 
 Order Service owns customer orders, immutable product snapshots, totals, idempotent order acceptance, and the order lifecycle state machine. It does not own catalog data, inventory quantities, payment attempts, credentials, or customer profiles.
 
-The current milestone implements authenticated order creation and customer-owned reads. New orders remain `PENDING`; Kafka-backed inventory/payment saga progression is the next workflow milestone.
+Authenticated order creation, customer-owned reads, and the first durable saga command are implemented. New orders remain `PENDING`; Inventory processes the command, while Order outcome handling and Payment progression are the next workflow milestone.
 
 ## API
 
@@ -40,7 +40,7 @@ The response stores Product Service's trusted SKU, name, unit price, and currenc
 4. An existing matching `(customerId, Idempotency-Key)` is returned immediately; a different hash returns `409`.
 5. Order makes one sorted batch call to Product Service with explicit connection/read timeouts and the correlation ID.
 6. Missing, inactive, malformed, or mixed-currency products reject the request before persistence.
-7. A short local transaction writes the order and item snapshots to `order_db`.
+7. A short local transaction writes the order, item snapshots, and one `InventoryReservationRequested` outbox row to `order_db`.
 
 The network call deliberately happens outside the database transaction. Holding a transaction and connection while waiting for another service would increase lock time and amplify downstream slowness.
 
@@ -55,6 +55,12 @@ The database unique constraint on `(customer_id, idempotency_key)` is the final 
 - different customer and same key: independent operation.
 
 An application pre-check improves the common path, but it cannot replace the unique constraint because concurrent requests can both pass a read before either commits.
+
+## Transactional Outbox
+
+The order and first inventory command share one local PostgreSQL transaction. A scheduled publisher selects due rows with `FOR UPDATE SKIP LOCKED`, publishes the persisted JSON envelope to `inventory.commands.v1`, and marks the row only after Kafka acknowledges it. Failed sends retain the row with bounded exponential backoff.
+
+A broker acknowledgment followed by a process crash before the database update can still cause duplicate publication. This is intentional at-least-once behavior; Inventory's processed-event inbox makes the command idempotent. Kafka producer idempotence alone cannot atomically commit Kafka and `order_db`.
 
 ## Failure Behavior
 
@@ -86,6 +92,8 @@ Detail/idempotency queries use an entity graph to fetch items in one query. Pagi
 | `ORDER_PRODUCT_SERVICE_URL` | No | `http://localhost:8083` |
 | `ORDER_PRODUCT_CONNECT_TIMEOUT` | No | `PT2S` |
 | `ORDER_PRODUCT_READ_TIMEOUT` | No | `PT3S` |
+| `KAFKA_BOOTSTRAP_SERVERS` | No | `localhost:9092` |
+| `OUTBOX_PUBLISHER_ENABLED` | No | `true` |
 | `SERVER_PORT` | No | `8085` |
 
 Production disables Swagger/OpenAPI through the `prod` profile. No password or private key is stored in source control.
@@ -99,6 +107,6 @@ From the repository root:
 docker build -f services/order-service/Dockerfile -t ecommerce/order-service:local .
 ```
 
-The 22 tests cover aggregate transitions/invariants, repository constraints and fetch behavior on PostgreSQL 17.6, request canonicalization, Product contract/failure mapping, idempotency races, MVC security/validation, ownership, Flyway, and a full HTTP/persistence flow.
+The 25 tests cover aggregate transitions/invariants, repository constraints and fetch behavior on PostgreSQL 17.6, request canonicalization, Product contract/failure mapping, idempotency races, MVC security/validation, ownership, Flyway, the full HTTP/persistence flow, outbox retry behavior, and real Kafka publication.
 
 The multi-stage image contains a Java 21 JRE runtime, runs as the non-root `spring` user, has a readiness health check, and uses container memory-aware JVM settings.
