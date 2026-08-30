@@ -24,6 +24,10 @@ spring:
               uri: ${INVENTORY_SERVICE_URL:http://localhost:8084}
               predicates:
                 - Path=/api/v1/inventory/**
+            - id: order-service
+              uri: ${ORDER_SERVICE_URL:http://localhost:8085}
+              predicates:
+                - Path=/api/v1/orders/**
           default-filters:
             - RemoveRequestHeader=X-User-Id
             - RemoveRequestHeader=X-User-Roles

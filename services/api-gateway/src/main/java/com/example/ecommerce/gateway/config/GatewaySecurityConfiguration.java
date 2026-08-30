@@ -38,6 +38,7 @@ public class GatewaySecurityConfiguration {
                         ).permitAll()
                         .pathMatchers(HttpMethod.GET, "/api/v1/products/**").permitAll()
                         .pathMatchers("/api/v1/users/**").hasAnyRole("CUSTOMER", "ADMIN")
+                        .pathMatchers("/api/v1/orders/**").hasAnyRole("CUSTOMER", "ADMIN")
                         .pathMatchers("/api/v1/products/**", "/api/v1/inventory/**").hasRole("ADMIN")
                         .anyExchange().authenticated())
                 .exceptionHandling(exceptions -> exceptions

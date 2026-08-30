@@ -23,6 +23,17 @@ spring:
   lifecycle:
     timeout-per-shutdown-phase: 20s
 
+order:
+  auth:
+    issuer: ${ORDER_AUTH_ISSUER:http://localhost:8081}
+    jwks-uri: ${ORDER_AUTH_JWKS_URI:http://localhost:8081/.well-known/jwks.json}
+    connect-timeout: ${ORDER_AUTH_CONNECT_TIMEOUT:PT2S}
+    read-timeout: ${ORDER_AUTH_READ_TIMEOUT:PT2S}
+  product-catalog:
+    base-url: ${ORDER_PRODUCT_SERVICE_URL:http://localhost:8083}
+    connect-timeout: ${ORDER_PRODUCT_CONNECT_TIMEOUT:PT2S}
+    read-timeout: ${ORDER_PRODUCT_READ_TIMEOUT:PT3S}
+
 server:
   port: ${SERVER_PORT:8085}
   shutdown: graceful
