@@ -31,6 +31,8 @@ Catalog reads and stock reservations have different workloads and invariants. Pr
 
 Each service owns one local transaction boundary. Order coordinates business progress but cannot mutate Inventory or Payment tables. Inventory and Payment return outcomes through versioned events; Order applies valid state transitions and requests compensation when needed.
 
+Payment's local charge/refund workflow is implemented. It stores `orderId` only as an opaque identifier, owns provider references, and has no client-facing route. Kafka integration remains pending.
+
 ### Notification
 
 Notification delivery is slow and failure-prone relative to order processing. It consumes events asynchronously so email simulation or a future provider outage cannot roll back a confirmed order.

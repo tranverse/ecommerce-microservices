@@ -44,5 +44,6 @@
         <module>services/user-service</module>
         <module>services/api-gateway</module>
         <module>services/order-service</module>
+        <module>services/payment-service</module>
     </modules>
 </project>

@@ -1,6 +1,6 @@
 # Database Architecture
 
-Status: **Accepted; `auth_db`, `user_db`, `product_db`, `inventory_db`, and `order_db` are implemented. Remaining databases arrive with their owners.**
+Status: **Accepted; `auth_db`, `user_db`, `product_db`, `inventory_db`, `order_db`, and `payment_db` are implemented. Remaining databases arrive with their owners.**
 
 ## Database-per-service
 
