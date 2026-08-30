@@ -8,7 +8,7 @@ The platform supports a customer journey from registration and login through pro
 
 ## Current state
 
-API Gateway, Auth, User, Product, Inventory, and the synchronous acceptance phase of Order Service are implemented, containerized, tested, and documented. Gateway routes Order traffic and applies coarse roles; Order validates Auth JWTs again, scopes data to `sub`, obtains trusted Product snapshots through one bounded batch call, and commits only to `order_db`. New orders remain `PENDING`; Kafka inventory/payment saga progression is not implemented yet. Product and Inventory management APIs still need their own resource-server enforcement before direct exposure is safe. Registration-to-profile auto-provisioning is also pending. The remaining components and asynchronous links in the diagram are target architecture. A component is not considered implemented until its code, tests, runtime configuration, and documentation are present.
+API Gateway, Auth, User, Product, Inventory, the synchronous acceptance phase of Order, and Payment's core application workflow are implemented, containerized, tested, and documented. Gateway routes Order traffic and applies coarse roles; Order validates Auth JWTs again, scopes data to `sub`, obtains trusted Product snapshots through one bounded batch call, and commits only to `order_db`. Payment independently owns `payment_db`, idempotent charge/refund state, and a simulated processor adapter. New orders remain `PENDING`; the Kafka adapters that connect Inventory, Payment, and Order are not implemented yet. Product and Inventory management APIs still need their own resource-server enforcement before direct exposure is safe. Registration-to-profile auto-provisioning is also pending. The remaining components and asynchronous links in the diagram are target architecture. A component is not considered implemented until its code, tests, runtime configuration, and documentation are present.
 
 ## Target architecture
 
@@ -88,14 +88,14 @@ sequenceDiagram
     I->>K: InventoryReserved or InventoryReservationFailed
     K->>O: Reservation result
     O->>K: PaymentRequested when reserved
-    K->>Pay: Process simulated payment
-    Pay->>K: PaymentCompleted or PaymentFailed
+    K->>Pay: Process simulated payment (adapter pending; core ready)
+    Pay->>K: PaymentCompleted or PaymentFailed (pending)
     K->>O: Payment result
     O->>K: OrderConfirmed or compensation commands
     K->>N: Customer notification event
 ```
 
-Synchronous acceptance through `202` is implemented. The later flow is eventually consistent and remains pending. A local `@Transactional` method cannot atomically update Order, Inventory, and Payment databases; the saga will record progress and emit compensating commands when a later step fails.
+Synchronous acceptance through `202` and Payment's local idempotent workflow are implemented. The Kafka-connected flow remains pending. A local `@Transactional` method cannot atomically update Order, Inventory, and Payment databases; the saga will record progress and emit compensating commands when a later step fails.
 
 ## Deployment view
 

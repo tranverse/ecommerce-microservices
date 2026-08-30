@@ -2,7 +2,7 @@
 
 A production-style Java 21 and Spring Boot 3 e-commerce system built incrementally as both a runnable distributed application and a practical microservices course.
 
-> **Implementation status:** API Gateway, Auth, User, Product, Inventory, and the synchronous acceptance phase of Order Service are implemented, containerized, and verified. Kafka-based inventory/payment saga progression, automatic profile provisioning, Payment, and Notification remain planned milestones.
+> **Implementation status:** API Gateway, Auth, User, Product, Inventory, the synchronous acceptance phase of Order, and the Payment domain/application workflow are implemented, containerized, and verified. Kafka adapters and saga progression, automatic profile provisioning, and Notification remain planned milestones.
 
 ## Project Overview
 
@@ -63,7 +63,7 @@ The complete design and current-state warning are maintained in [System Overview
 | Product Service | Catalog, current prices, filtering and management | Implemented |
 | Inventory Service | Stock, reservations, releases and concurrency | Implemented |
 | Order Service | Authenticated orders, immutable item snapshots and saga orchestration | Acceptance implemented; async saga pending |
-| Payment Service | Idempotent simulated payments and compensation | Planned |
+| Payment Service | Idempotent simulated charges, declines, outage recovery and refunds | Core workflow implemented; Kafka adapter pending |
 | Notification Service | Asynchronous notification history and delivery simulation | Planned |
 
 Detailed ownership and prohibited coupling are documented in [Service Boundaries](docs/architecture/service-boundaries.md).
@@ -75,8 +75,8 @@ Detailed ownership and prohibited coupling are documented in [Service Boundaries
 | Java 21 | LTS runtime, records, modern language/runtime features | Active |
 | Spring Boot 3.5 | Production application foundation and dependency management | Active |
 | Maven Wrapper | Reproducible builds without global Maven installation | Active |
-| PostgreSQL | Strong relational constraints and transactional service data | Active in Auth, User, Product, Inventory, and Order |
-| Flyway | Versioned, reviewable service-owned schema migrations | Active in Auth, User, Product, Inventory, and Order |
+| PostgreSQL | Strong relational constraints and transactional service data | Active in Auth, User, Product, Inventory, Order, and Payment |
+| Flyway | Versioned, reviewable service-owned schema migrations | Active in Auth, User, Product, Inventory, Order, and Payment |
 | Spring Security and JWT | Auth lifecycle, public JWKS, local token validation | Active in Auth, User, Order, and Gateway; other services pending |
 | Spring Cloud Gateway | Reactive edge routing without business logic | Active |
 | Kafka | Durable asynchronous saga communication and notifications | Planned |
@@ -99,7 +99,8 @@ Current:
 │   ├── user-service/           # Profiles, addresses, user_db, ownership tests
 │   ├── product-service/        # Catalog API, product_db, tests, and image
 │   ├── inventory-service/      # Stock reservations, inventory_db, concurrency tests
-│   └── order-service/          # Authenticated acceptance, snapshots, order_db, state machine
+│   ├── order-service/          # Authenticated acceptance, snapshots, order_db, state machine
+│   └── payment-service/        # Idempotent charge/refund workflow and payment_db
 ├── docs/
 │   ├── architecture/
 │   ├── decisions/
@@ -192,6 +193,10 @@ The order endpoint now validates products synchronously through one bounded batc
 Order Service will orchestrate the saga because it owns the customer-visible lifecycle and state machine. Inventory failure cancels the order. Payment failure after reservation requests an inventory release and then cancels the order. Notification reacts only after a durable business outcome.
 
 The decision and trade-offs are in [ADR 003](docs/decisions/003-orchestrated-order-saga.md). Detailed flow documentation will be added with the implementation.
+
+## Payment Workflow
+
+Payment Service now persists one payment per opaque Order ID and implements `PENDING -> COMPLETED`, `PENDING -> FAILED`, and `COMPLETED -> REFUNDED` rules. Provider calls run outside database transactions and use the durable Payment ID as an idempotency key, making ambiguous charge/refund retries safe. Business declines are terminal; technical outages preserve a retryable state. The service intentionally has no public business endpoint because the next milestone will attach it to Kafka as a saga participant. See [Payment Service](services/payment-service/README.md) and [Payment Processing Flow](docs/flows/payment-processing-flow.md).
 
 ## Reliability
 
@@ -371,6 +376,28 @@ Order readiness is `http://localhost:8085/actuator/health/readiness`; Swagger UI
 docker build -f services/order-service/Dockerfile -t ecommerce/order-service:local .
 ```
 
+### Payment Service
+
+Start its separate PostgreSQL database, then run Payment:
+
+```powershell
+$env:PAYMENT_DB_PASSWORD = "<choose-a-local-password>"
+$env:PAYMENT_DB_URL = "jdbc:postgresql://localhost:5437/payment_db"
+docker run --name ecommerce-payment-db --rm -d `
+  -e POSTGRES_DB=payment_db `
+  -e POSTGRES_USER=payment_app `
+  -e POSTGRES_PASSWORD=$env:PAYMENT_DB_PASSWORD `
+  -p 5437:5432 postgres:17.6-alpine
+
+.\mvnw.cmd -pl services/payment-service spring-boot:run
+```
+
+Payment readiness is `http://localhost:8086/actuator/health/readiness`. There is no public business API until the Kafka adapter is implemented.
+
+```powershell
+docker build -f services/payment-service/Dockerfile -t ecommerce/payment-service:local .
+```
+
 The final target command will be:
 
 ```text
@@ -457,6 +484,19 @@ Order Service supports:
 | `ORDER_PRODUCT_CONNECT_TIMEOUT` | Product connection timeout | `PT2S` |
 | `ORDER_PRODUCT_READ_TIMEOUT` | Product response timeout | `PT3S` |
 
+Payment Service supports:
+
+| Variable | Purpose | Default |
+| --- | --- | --- |
+| `SERVER_PORT` | Payment Service actuator port | `8086` |
+| `PAYMENT_DB_URL` | Payment PostgreSQL JDBC URL | `jdbc:postgresql://localhost:5432/payment_db` |
+| `PAYMENT_DB_USERNAME` | Payment database user | `payment_app` |
+| `PAYMENT_DB_PASSWORD` | Payment database password | Required; no default |
+| `PAYMENT_DB_POOL_SIZE` | Maximum payment database pool size | `10` |
+| `PAYMENT_DB_MIN_IDLE` | Minimum payment idle connections | `2` |
+| `PAYMENT_SIMULATOR_DECLINE_PAYMENTS` | Return deterministic business declines | `false` |
+| `PAYMENT_SIMULATOR_UNAVAILABLE` | Simulate processor unavailability | `false` |
+
 Kafka and observability variables will be added to `.env.example` with their implementations. A real `.env` file is ignored and never committed.
 
 ## API Examples
@@ -535,7 +575,7 @@ Run every implemented service suite:
 .\mvnw.cmd test
 ```
 
-Product has 20 tests, Inventory has 17 including a real concurrent reservation race, Auth has 15 covering cryptography/token lifecycle, User has 17 covering resource-server security and ownership, Gateway has 9 covering routing and edge behavior, and Order has 22 covering its aggregate, HTTP client, security, idempotency, ownership, and PostgreSQL transaction behavior. The implemented reactor currently has 100 tests. Each service uses the smallest meaningful combination of unit, controller, repository, integration, security, proxy, and Testcontainers tests.
+Product has 20 tests, Inventory has 17 including a real concurrent reservation race, Auth has 15 covering cryptography/token lifecycle, User has 17 covering resource-server security and ownership, Gateway has 9 covering routing and edge behavior, Order has 22 covering its aggregate, HTTP client, security, idempotency, ownership, and PostgreSQL transaction behavior, and Payment has 19 covering state transitions, database constraints, retry/refund semantics, and processor behavior. The implemented reactor currently has 119 tests. Each service uses the smallest meaningful combination of unit, controller, repository, integration, security, proxy, and Testcontainers tests.
 
 ## Documentation
 
@@ -550,6 +590,7 @@ Product has 20 tests, Inventory has 17 including a real concurrent reservation r
 - [Product request flow](docs/flows/product-flow.md)
 - [Inventory reservation flow](docs/flows/inventory-flow.md)
 - [Order creation flow](docs/flows/order-creation-flow.md)
+- [Payment processing flow](docs/flows/payment-processing-flow.md)
 - [Architecture decisions](docs/decisions/)
 - [Learning notes](docs/learning/)
 
@@ -568,8 +609,9 @@ Start with:
 7. [Identity and Resource Ownership](docs/learning/07-identity-and-resource-ownership.md)
 8. [API Gateway and Edge Security](docs/learning/08-api-gateway-and-edge-security.md)
 9. [Synchronous Communication, Transaction Boundaries, and Idempotency](docs/learning/09-synchronous-communication-and-idempotency.md)
-10. Read the ADRs and compare their alternatives.
-11. Follow the Gateway, Auth, User, Product, Inventory, and Order READMEs from edge filter/controller to service, domain, repository, migration, and tests.
+10. [Payment Side Effects and Idempotency](docs/learning/10-payment-side-effects-and-idempotency.md)
+11. Read the ADRs and compare their alternatives.
+12. Follow the Gateway, Auth, User, Product, Inventory, Order, and Payment READMEs from adapters to application services, domains, repositories, migrations, and tests.
 
 Later notes will reference the exact service, class, endpoint, migration, event, and configuration that implements each concept.
 
