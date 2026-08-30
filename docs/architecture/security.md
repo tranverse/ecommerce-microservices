@@ -2,7 +2,7 @@
 
 ## Current Scope
 
-Auth Service implements credential storage, BCrypt, RS256 access tokens, rotating opaque refresh tokens, public JWKS, and CUSTOMER/ADMIN claims. User Service is the first resource server: it accepts only RS256, validates issuer/signature/expiry through JWKS, requires CUSTOMER/ADMIN, and scopes profile resources to JWT `sub`. Gateway, Product, Inventory, and later services add enforcement in their own milestones; Product and Inventory management endpoints are not yet claimed to be publicly secured.
+Auth Service implements credential storage, BCrypt, RS256 access tokens, rotating opaque refresh tokens, public JWKS, and CUSTOMER/ADMIN claims. API Gateway accepts only RS256, validates issuer/signature/expiry through JWKS, applies coarse route roles, strips untrusted identity headers, and relays the bearer token. User Service validates the token again, requires CUSTOMER/ADMIN, and scopes profile resources to JWT `sub`. Product, Inventory, and later services add backend enforcement in their own milestones; Product and Inventory management endpoints are protected at the edge but are not yet safe for direct public exposure.
 
 ## Trust Boundaries
 
@@ -12,9 +12,9 @@ flowchart LR
     Auth -->|credentials + hashed refresh tokens| DB[(auth_db)]
     Auth -->|RS256 access token + opaque refresh token| Client
     Auth -->|public keys only| JWKS[JWKS endpoint]
-    Client -->|bearer token| User[User Service]
-    Client -. future bearer token .-> Gateway[API Gateway]
-    JWKS -. public key discovery .-> Gateway
+    Client -->|bearer token| Gateway[API Gateway]
+    Gateway -->|relayed bearer token| User[User Service]
+    JWKS -->|cached public key| Gateway
     JWKS -->|cached public key| User
     JWKS -. public key discovery .-> Services[Other Resource Services]
 ```
@@ -49,7 +49,6 @@ Never log raw passwords, password hashes, access tokens, refresh tokens, private
 
 ## Remaining Security Work
 
-- Gateway JWT validation and route authorization.
 - Resource-server validation and method/ownership checks in Product, Inventory, and Order.
 - CORS policy and TLS termination for deployed environments.
 - Rate limiting/credential-stuffing defense at the edge.

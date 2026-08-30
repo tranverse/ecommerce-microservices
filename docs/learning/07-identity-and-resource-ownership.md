@@ -57,7 +57,7 @@ Role answers a broad question: is this principal a customer or administrator? Ow
 
 1. Why is a valid CUSTOMER token insufficient authorization for an address UUID?
 2. What security bug does a `/me` API remove by construction?
-3. Why validate JWT in User when Gateway will also validate it?
+3. Why validate JWT in User when Gateway already validates it?
 4. Why return 404 rather than 403 for another user's address?
 5. What happens on a JWKS cache miss if Auth is unavailable, and why do timeouts matter?
 

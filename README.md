@@ -2,7 +2,7 @@
 
 A production-style Java 21 and Spring Boot 3 e-commerce system built incrementally as both a runnable distributed application and a practical microservices course.
 
-> **Implementation status:** Auth, User, Product, and Inventory Services are implemented, containerized, and verified with PostgreSQL/security/concurrency integration tests. Automatic profile provisioning, Gateway routing, and the connected order workflow remain planned milestones.
+> **Implementation status:** API Gateway, Auth, User, Product, and Inventory Services are implemented, containerized, and verified with routing/security/PostgreSQL/concurrency tests. Automatic profile provisioning and the connected order workflow remain planned milestones.
 
 ## Project Overview
 
@@ -57,7 +57,7 @@ The complete design and current-state warning are maintained in [System Overview
 
 | Service | Responsibility | Status |
 | --- | --- | --- |
-| API Gateway | Public routing, correlation IDs, edge security | Planned |
+| API Gateway | Public routing, correlation IDs, edge security | Implemented |
 | Auth Service | Credentials, password hashing, JWT and roles | Implemented |
 | User Service | Customer profiles and addresses | Implemented |
 | Product Service | Catalog, current prices, filtering and management | Implemented |
@@ -77,8 +77,8 @@ Detailed ownership and prohibited coupling are documented in [Service Boundaries
 | Maven Wrapper | Reproducible builds without global Maven installation | Active |
 | PostgreSQL | Strong relational constraints and transactional service data | Active in Auth, User, Product, and Inventory |
 | Flyway | Versioned, reviewable service-owned schema migrations | Active in Auth, User, Product, and Inventory |
-| Spring Security and JWT | Auth lifecycle, public JWKS, local token validation | Active in Auth and User; Gateway/other services pending |
-| Spring Cloud Gateway | Reactive edge routing without business logic | Planned |
+| Spring Security and JWT | Auth lifecycle, public JWKS, local token validation | Active in Auth, User, and Gateway; other services pending |
+| Spring Cloud Gateway | Reactive edge routing without business logic | Active |
 | Kafka | Durable asynchronous saga communication and notifications | Planned |
 | Testcontainers | Integration tests against real PostgreSQL/Kafka behavior | Active for PostgreSQL |
 | Resilience4j | Bounded failure handling for justified synchronous calls | Planned |
@@ -94,6 +94,7 @@ Current:
 ```text
 .
 ├── services/
+│   ├── api-gateway/            # Edge routing, JWT roles, timeouts, correlation IDs
 │   ├── auth-service/           # Credentials, JWT/JWKS, auth_db, security tests
 │   ├── user-service/           # Profiles, addresses, user_db, ownership tests
 │   ├── product-service/        # Catalog API, product_db, tests, and image
@@ -152,7 +153,7 @@ Current and target flow:
 
 1. Auth Service registers credentials, hashes passwords, and returns short-lived RS256 JWTs. Implemented.
 2. User Service validates JWTs through public JWKS and derives profile ownership from `sub`. Implemented.
-3. Gateway will validate the token for coarse edge routing decisions. Planned.
+3. Gateway validates the token for coarse edge routing decisions. Implemented.
 4. Other backend services will validate tokens and enforce their own authorization. Planned.
 5. User Service owns profile data and never stores passwords or credential email.
 
@@ -261,6 +262,22 @@ User readiness is `http://localhost:8082/actuator/health/readiness`. Its protect
 
 ```powershell
 docker build -f services/user-service/Dockerfile -t ecommerce/user-service:local .
+```
+
+### API Gateway
+
+Keep the downstream services running, then start the public entry point:
+
+```powershell
+$env:GATEWAY_AUTH_ISSUER = "http://localhost:8081"
+$env:GATEWAY_AUTH_JWKS_URI = "http://localhost:8081/.well-known/jwks.json"
+.\mvnw.cmd -pl services/api-gateway spring-boot:run
+```
+
+Gateway health is `http://localhost:8080/actuator/health/readiness`. Client requests should use port `8080`, for example `http://localhost:8080/api/v1/auth/register` and `http://localhost:8080/api/v1/users/me`.
+
+```powershell
+docker build -f services/api-gateway/Dockerfile -t ecommerce/api-gateway:local .
 ```
 
 ### Product Service
@@ -389,6 +406,19 @@ User Service supports:
 | `USER_AUTH_CONNECT_TIMEOUT` | JWKS connection timeout | `PT2S` |
 | `USER_AUTH_READ_TIMEOUT` | JWKS response timeout | `PT2S` |
 
+API Gateway supports:
+
+| Variable | Purpose | Default |
+| --- | --- | --- |
+| `SERVER_PORT` | Gateway HTTP port | `8080` |
+| `GATEWAY_AUTH_ISSUER` | Exact trusted JWT issuer | `http://localhost:8081` |
+| `GATEWAY_AUTH_JWKS_URI` | Auth public-key endpoint | `http://localhost:8081/.well-known/jwks.json` |
+| `GATEWAY_JWKS_CONNECT_TIMEOUT` | JWKS connection timeout | `PT2S` |
+| `GATEWAY_JWKS_READ_TIMEOUT` | JWKS response timeout | `PT2S` |
+| `GATEWAY_CONNECT_TIMEOUT_MS` | Downstream connection timeout in milliseconds | `2000` |
+| `GATEWAY_RESPONSE_TIMEOUT` | Downstream response timeout | `5s` |
+| `*_SERVICE_URL` | Auth/User/Product/Inventory route destinations | Service-specific localhost URL |
+
 Kafka and observability variables will be added to `.env.example` with their implementations. A real `.env` file is ignored and never committed.
 
 ## API Examples
@@ -396,7 +426,7 @@ Kafka and observability variables will be added to `.env.example` with their imp
 Register credentials:
 
 ```bash
-curl -X POST http://localhost:8081/api/v1/auth/register \
+curl -X POST http://localhost:8080/api/v1/auth/register \
   -H "Content-Type: application/json" \
   -d '{"email":"customer@example.com","password":"correct horse battery staple"}'
 ```
@@ -406,7 +436,7 @@ Auth details and refresh/key behavior are documented in [Auth Service](services/
 Create or replace the authenticated customer's profile using an Auth access token:
 
 ```bash
-curl -X PUT http://localhost:8082/api/v1/users/me \
+curl -X PUT http://localhost:8080/api/v1/users/me \
   -H "Authorization: Bearer ACCESS_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"displayName":"Linh Nguyen","phone":"+84901234567"}'
@@ -417,7 +447,8 @@ The client cannot supply a user ID; User Service derives it from the verified JW
 Create a product:
 
 ```bash
-curl -i -X POST http://localhost:8083/api/v1/products \
+curl -i -X POST http://localhost:8080/api/v1/products \
+  -H "Authorization: Bearer ADMIN_ACCESS_TOKEN" \
   -H "Content-Type: application/json" \
   -H "X-Correlation-ID: readme-demo" \
   -d '{"sku":"LAPTOP-001","name":"Developer Laptop","description":"Development workstation","price":1499.00,"currency":"USD","status":"ACTIVE"}'
@@ -426,7 +457,7 @@ curl -i -X POST http://localhost:8083/api/v1/products \
 Search the catalog:
 
 ```bash
-curl "http://localhost:8083/api/v1/products?query=laptop&status=ACTIVE&page=0&size=20&sortBy=price&direction=ASC"
+curl "http://localhost:8080/api/v1/products?query=laptop&status=ACTIVE&page=0&size=20&sortBy=price&direction=ASC"
 ```
 
 Product details and the stable error contract are documented in [Product Service](services/product-service/README.md). Order examples will be added only when those endpoints are executable.
@@ -434,10 +465,12 @@ Product details and the stable error contract are documented in [Product Service
 Create stock using a Product Service UUID, then reserve it for an Order UUID:
 
 ```bash
-curl -X PUT http://localhost:8084/api/v1/inventory/items/PRODUCT_UUID \
+curl -X PUT http://localhost:8080/api/v1/inventory/items/PRODUCT_UUID \
+  -H "Authorization: Bearer ADMIN_ACCESS_TOKEN" \
   -H "Content-Type: application/json" -d '{"totalQuantity":10}'
 
-curl -X POST http://localhost:8084/api/v1/inventory/reservations \
+curl -X POST http://localhost:8080/api/v1/inventory/reservations \
+  -H "Authorization: Bearer ADMIN_ACCESS_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"orderId":"ORDER_UUID","items":[{"productId":"PRODUCT_UUID","quantity":2}]}'
 ```
@@ -452,7 +485,7 @@ Run every implemented service suite:
 .\mvnw.cmd test
 ```
 
-The Product suite has 18 tests, Inventory has 17 including a real concurrent reservation race, Auth has 15 covering cryptography/token lifecycle, and User has 17 covering resource-server security and ownership. The implemented reactor currently has 67 tests. Each service uses the smallest meaningful combination of unit, controller, repository, integration, security, and Testcontainers tests.
+The Product suite has 18 tests, Inventory has 17 including a real concurrent reservation race, Auth has 15 covering cryptography/token lifecycle, User has 17 covering resource-server security and ownership, and Gateway has 8 covering routing, edge authorization, header hygiene, token relay, and correlation IDs. The implemented reactor currently has 75 tests. Each service uses the smallest meaningful combination of unit, controller, repository, integration, security, proxy, and Testcontainers tests.
 
 ## Documentation
 
@@ -463,6 +496,7 @@ The Product suite has 18 tests, Inventory has 17 including a real concurrent res
 - [Security architecture](docs/architecture/security.md)
 - [Authentication flow](docs/flows/authentication-flow.md)
 - [User profile flow](docs/flows/user-profile-flow.md)
+- [API Gateway request flow](docs/flows/gateway-request-flow.md)
 - [Product request flow](docs/flows/product-flow.md)
 - [Inventory reservation flow](docs/flows/inventory-flow.md)
 - [Architecture decisions](docs/decisions/)
@@ -481,8 +515,9 @@ Start with:
 5. [Concurrency and Inventory Reservations](docs/learning/05-concurrency-and-inventory-reservations.md)
 6. [Authentication in Microservices](docs/learning/06-authentication-in-microservices.md)
 7. [Identity and Resource Ownership](docs/learning/07-identity-and-resource-ownership.md)
-8. Read the ADRs and compare their alternatives.
-9. Follow the Auth, User, Product, and Inventory READMEs from controller to service, domain, repository, migration, and tests.
+8. [API Gateway and Edge Security](docs/learning/08-api-gateway-and-edge-security.md)
+9. Read the ADRs and compare their alternatives.
+10. Follow the Gateway, Auth, User, Product, and Inventory READMEs from edge filter/controller to service, domain, repository, migration, and tests.
 
 Later notes will reference the exact service, class, endpoint, migration, event, and configuration that implements each concept.
 
