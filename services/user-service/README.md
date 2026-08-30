@@ -34,7 +34,7 @@ Profiles store display name and optional E.164 phone. Addresses validate lengths
 - Enforces both allowed role and resource ownership.
 - Returns stable JSON for 401/403 and never logs bearer tokens.
 
-Gateway will later add coarse edge checks, but User continues validating and authorizing requests itself. Internal network location is not trust.
+Gateway now adds coarse edge checks, but User continues validating and authorizing requests itself. Internal network location is not trust.
 
 ## Configuration
 

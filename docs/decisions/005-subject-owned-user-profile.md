@@ -12,7 +12,7 @@ Auth and User represent the same human for different purposes. Auth owns sensiti
 
 1. Put credentials and profiles back into one shared database/table.
 2. Accept `userId` in profile paths and compare it with JWT `sub` in every handler.
-3. Trust a user ID inserted by the future Gateway.
+3. Trust a user ID inserted by Gateway.
 4. Expose subject-relative `/me` resources and derive identity from a JWT validated again by User.
 
 ## Decision
