@@ -51,6 +51,9 @@ public class OutboxEvent {
     @Column(name = "occurred_at", nullable = false, updatable = false)
     private Instant occurredAt;
 
+    @Column(name = "next_attempt_at", nullable = false)
+    private Instant nextAttemptAt;
+
     @Column(name = "published_at")
     private Instant publishedAt;
 
@@ -88,6 +91,7 @@ public class OutboxEvent {
         this.payload = Objects.requireNonNull(payload, "payload must not be null");
         this.correlationId = requireSafeText(correlationId, "correlationId");
         this.occurredAt = Objects.requireNonNull(occurredAt, "occurredAt must not be null");
+        this.nextAttemptAt = occurredAt;
     }
 
     public static OutboxEvent create(
@@ -109,6 +113,30 @@ public class OutboxEvent {
                 envelope.correlationId(),
                 envelope.occurredAt()
         );
+    }
+
+    public void markPublished(Instant publishedAt) {
+        if (this.publishedAt != null) {
+            return;
+        }
+        this.publishedAt = Objects.requireNonNull(publishedAt, "publishedAt must not be null");
+        this.attempts = Math.incrementExact(attempts);
+        this.lastError = null;
+    }
+
+    public void recordFailure(String error, Instant nextAttemptAt) {
+        if (publishedAt != null) {
+            throw new IllegalStateException("published event cannot record a failure");
+        }
+        this.attempts = Math.incrementExact(attempts);
+        if (error == null || error.isBlank() || error.length() > 500) {
+            throw new IllegalArgumentException("error must contain between 1 and 500 characters");
+        }
+        this.lastError = error;
+        this.nextAttemptAt = Objects.requireNonNull(nextAttemptAt, "nextAttemptAt must not be null");
+        if (this.nextAttemptAt.isBefore(occurredAt)) {
+            throw new IllegalArgumentException("nextAttemptAt must not precede occurredAt");
+        }
     }
 
     private static String requireSafeText(String value, String field) {
@@ -160,6 +188,10 @@ public class OutboxEvent {
 
     public Instant getPublishedAt() {
         return publishedAt;
+    }
+
+    public Instant getNextAttemptAt() {
+        return nextAttemptAt;
     }
 
     public int getAttempts() {
