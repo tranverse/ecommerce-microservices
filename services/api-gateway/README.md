@@ -7,12 +7,13 @@ API Gateway is the public HTTP entry point for the currently implemented service
 Without a gateway, every client must know each service address and repeat cross-cutting concerns such as token handling and request correlation. A gateway gives clients one stable origin and rejects obviously invalid traffic before it consumes backend capacity. Backend services still validate tokens and enforce domain authorization: the network and the gateway are not trusted as proof of identity.
 
 ```text
-Client -> API Gateway -> Auth / User / Product / Inventory
+Client -> API Gateway -> Auth / User / Product / Inventory / Order
              |
              +-> validate JWT, authorize route, normalize correlation ID
 
 Auth -> auth_db       User -> user_db
 Product -> product_db Inventory -> inventory_db
+Order -> order_db
 Gateway -> no database
 ```
 
@@ -26,6 +27,7 @@ Gateway -> no database
 | `/api/v1/users/**` | `CUSTOMER` or `ADMIN` | User Service |
 | Non-GET `/api/v1/products/**` | `ADMIN` | Product Service |
 | `/api/v1/inventory/**` | `ADMIN` | Inventory Service |
+| `/api/v1/orders/**` | `CUSTOMER` or `ADMIN` | Order Service |
 | `/actuator/health/**`, `/actuator/info` | Public, handled locally | Gateway |
 
 The bearer token is relayed unchanged so a protected downstream service can verify it independently. `X-User-Id` and `X-User-Roles` from callers are removed; identity must come from a verified JWT, never an untrusted header.
@@ -57,6 +59,7 @@ Rate limiting, CORS for a real web origin, TLS termination, retry/circuit-breake
 | `USER_SERVICE_URL` | No | `http://localhost:8082` |
 | `PRODUCT_SERVICE_URL` | No | `http://localhost:8083` |
 | `INVENTORY_SERVICE_URL` | No | `http://localhost:8084` |
+| `ORDER_SERVICE_URL` | No | `http://localhost:8085` |
 
 Use internal DNS names such as `http://auth-service:8081` inside Docker networking. The issuer configured in Auth, Gateway, and resource services must match exactly.
 
@@ -75,6 +78,6 @@ Run its test suite and build the production-style image:
 docker build -f services/api-gateway/Dockerfile -t ecommerce/api-gateway:local .
 ```
 
-Gateway has 8 tests covering public routing, protected-route rejection before forwarding, role policy, bearer-token relay, spoofed-header removal, invalid tokens, safe/unsafe correlation IDs, and response-header normalization against a real Reactor Netty downstream server.
+Gateway has 9 tests covering public routing, User/Order protected routes, protected-route rejection before forwarding, role policy, bearer-token relay, spoofed-header removal, invalid tokens, safe/unsafe correlation IDs, and response-header normalization against a real Reactor Netty downstream server.
 
 The image uses a multi-stage Java 21 build, a JRE-only runtime, a non-root `spring` user, graceful shutdown, and readiness health check.

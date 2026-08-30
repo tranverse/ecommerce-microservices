@@ -18,6 +18,7 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 
 import java.math.BigDecimal;
+import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
 
@@ -84,6 +85,17 @@ class ProductApiIntegrationTest {
         );
         assertThat(updateResponse.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(updateResponse.getBody()).extracting(ProductResponse::version).isEqualTo(1L);
+
+        ResponseEntity<ProductResponse[]> batchResponse = restTemplate.getForEntity(
+                "/api/v1/products/batch?ids={firstId}&ids={missingId}",
+                ProductResponse[].class,
+                created.id(),
+                UUID.randomUUID()
+        );
+        assertThat(batchResponse.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(List.of(batchResponse.getBody()))
+                .extracting(ProductResponse::id)
+                .containsExactly(created.id());
 
         ResponseEntity<ApiErrorResponse> staleResponse = restTemplate.exchange(
                 "/api/v1/products/{id}",

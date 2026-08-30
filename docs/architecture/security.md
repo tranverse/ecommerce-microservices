@@ -2,7 +2,7 @@
 
 ## Current Scope
 
-Auth Service implements credential storage, BCrypt, RS256 access tokens, rotating opaque refresh tokens, public JWKS, and CUSTOMER/ADMIN claims. API Gateway accepts only RS256, validates issuer/signature/expiry through JWKS, applies coarse route roles, strips untrusted identity headers, and relays the bearer token. User Service validates the token again, requires CUSTOMER/ADMIN, and scopes profile resources to JWT `sub`. Product, Inventory, and later services add backend enforcement in their own milestones; Product and Inventory management endpoints are protected at the edge but are not yet safe for direct public exposure.
+Auth Service implements credential storage, BCrypt, RS256 access tokens, rotating opaque refresh tokens, public JWKS, and CUSTOMER/ADMIN claims. API Gateway accepts only RS256, validates issuer/signature/expiry through JWKS, applies coarse route roles, strips untrusted identity headers, and relays the bearer token. User and Order Services validate the token again, require CUSTOMER/ADMIN, and scope their resources to JWT `sub`. Product, Inventory, and later services add backend enforcement in their own milestones; Product and Inventory management endpoints are protected at the edge but are not yet safe for direct public exposure.
 
 ## Trust Boundaries
 
@@ -14,8 +14,10 @@ flowchart LR
     Auth -->|public keys only| JWKS[JWKS endpoint]
     Client -->|bearer token| Gateway[API Gateway]
     Gateway -->|relayed bearer token| User[User Service]
+    Gateway -->|relayed bearer token| Order[Order Service]
     JWKS -->|cached public key| Gateway
     JWKS -->|cached public key| User
+    JWKS -->|cached public key| Order
     JWKS -. public key discovery .-> Services[Other Resource Services]
 ```
 
@@ -49,7 +51,7 @@ Never log raw passwords, password hashes, access tokens, refresh tokens, private
 
 ## Remaining Security Work
 
-- Resource-server validation and method/ownership checks in Product, Inventory, and Order.
+- Resource-server validation and method/ownership checks in Product, Inventory, Payment, and Notification where applicable.
 - CORS policy and TLS termination for deployed environments.
 - Rate limiting/credential-stuffing defense at the edge.
 - Production secret/key rotation procedures.

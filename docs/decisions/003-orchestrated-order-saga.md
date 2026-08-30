@@ -1,6 +1,6 @@
 # ADR 003: Use an Orchestrated Saga for Order Processing
 
-Status: **Accepted design; implementation pending**
+Status: **Accepted design; order aggregate and synchronous acceptance implemented, asynchronous saga pending**
 
 ## Context
 

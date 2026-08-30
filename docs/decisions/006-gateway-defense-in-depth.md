@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted and implemented for API Gateway and User Service. Resource-server enforcement for other protected business services remains incremental.
+Accepted and implemented for API Gateway, User Service, and Order Service. Resource-server enforcement for other protected business services remains incremental.
 
 ## Context
 
@@ -39,4 +39,4 @@ Edge validation rejects bad requests early and centralizes client-facing routing
 - Internal network location is not authentication.
 - Identity headers from external callers are stripped and are not an authority source.
 - Gateway failures are bounded by timeouts; retries/circuit breakers require operation-specific justification.
-- Product, Inventory, Order, and later services must implement their own protection before their management endpoints are considered safely deployable.
+- Product, Inventory, Payment, Notification, and later protected services must implement their own protection before their protected endpoints are considered safely deployable.

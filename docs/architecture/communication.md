@@ -1,6 +1,6 @@
 # Service Communication
 
-Status: **Accepted target policy; communication is added only with a concrete use case.**
+Status: **Accepted; Order-to-Product synchronous lookup is implemented. Kafka interactions remain target policy.**
 
 ## Decision policy
 

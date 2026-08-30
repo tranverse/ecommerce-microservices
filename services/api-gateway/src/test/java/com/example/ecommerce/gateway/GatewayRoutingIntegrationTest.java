@@ -62,6 +62,7 @@ class GatewayRoutingIntegrationTest {
         registry.add("USER_SERVICE_URL", () -> baseUrl);
         registry.add("PRODUCT_SERVICE_URL", () -> baseUrl);
         registry.add("INVENTORY_SERVICE_URL", () -> baseUrl);
+        registry.add("ORDER_SERVICE_URL", () -> baseUrl);
     }
 
     @AfterAll
@@ -173,6 +174,35 @@ class GatewayRoutingIntegrationTest {
                 .expectStatus().isOk()
                 .expectBody()
                 .jsonPath("$.method").isEqualTo("PUT");
+
+        assertThat(DOWNSTREAM_REQUESTS).hasValue(1);
+    }
+
+    @Test
+    void routesCustomerOrdersAndRejectsDisallowedRolesAtTheEdge() {
+        webTestClient.post()
+                .uri("/api/v1/orders")
+                .headers(headers -> {
+                    headers.setBearerAuth("customer-token");
+                    headers.set("X-Correlation-ID", "gateway-order-route");
+                })
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue("{\"items\":[]}")
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.path").isEqualTo("/api/v1/orders")
+                .jsonPath("$.method").isEqualTo("POST")
+                .jsonPath("$.authorizationPresent").isEqualTo(true)
+                .jsonPath("$.correlationId").isEqualTo("gateway-order-route");
+
+        webTestClient.get()
+                .uri("/api/v1/orders")
+                .headers(headers -> headers.setBearerAuth("guest-token"))
+                .exchange()
+                .expectStatus().isForbidden()
+                .expectBody()
+                .jsonPath("$.errorCode").isEqualTo("FORBIDDEN");
 
         assertThat(DOWNSTREAM_REQUESTS).hasValue(1);
     }

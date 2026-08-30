@@ -24,6 +24,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.util.Comparator;
+import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 
@@ -68,6 +70,14 @@ public class ProductService {
     @Transactional(readOnly = true)
     public ProductResponse getProduct(UUID productId) {
         return productMapper.toResponse(findProduct(productId));
+    }
+
+    @Transactional(readOnly = true)
+    public List<ProductResponse> getProducts(Set<UUID> productIds) {
+        return productRepository.findAllById(productIds).stream()
+                .sorted(Comparator.comparing(Product::getId))
+                .map(productMapper::toResponse)
+                .toList();
     }
 
     @Transactional(readOnly = true)

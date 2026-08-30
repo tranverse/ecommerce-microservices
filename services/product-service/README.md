@@ -11,9 +11,12 @@ Base path: `/api/v1/products`
 | `POST` | `/api/v1/products` | Create a catalog product | `201 Created` |
 | `GET` | `/api/v1/products/{id}` | Read one product | `200 OK` |
 | `GET` | `/api/v1/products` | Search, filter, sort, and paginate | `200 OK` |
+| `GET` | `/api/v1/products/batch?ids=...` | Resolve up to 50 product snapshots in one call | `200 OK` |
 | `PUT` | `/api/v1/products/{id}` | Replace mutable product details | `200 OK` |
 
 Search parameters are `query`, `status`, `minimumPrice`, `maximumPrice`, `page`, `size`, `sortBy`, and `direction`. Page size is capped at 100. Allowed sort fields are `name`, `sku`, `price`, `status`, and `createdAt`.
+
+The batch read supports Order Service's synchronous snapshot lookup. It deduplicates IDs, caps fan-out at 50, performs one repository query, and returns results in deterministic ID order. Missing IDs are omitted so the caller can apply its own domain error policy.
 
 The SKU cannot be changed after creation. Catalog removal is represented by `INACTIVE`; hard deletion would break historical references and is not exposed.
 
@@ -75,7 +78,7 @@ cmd /c mvnw.cmd -pl services/product-service package
 docker build -f services/product-service/Dockerfile -t ecommerce/product-service:local .
 ```
 
-Tests include pure domain/service tests, a Spring MVC slice, JPA repository tests, Flyway validation, and a full HTTP integration flow against PostgreSQL 17.6 through Testcontainers.
+The 20 tests include pure domain/service tests, batch lookup behavior, a Spring MVC slice, JPA repository tests, Flyway validation, and a full HTTP integration flow against PostgreSQL 17.6 through Testcontainers.
 
 ## Internal Design
 
