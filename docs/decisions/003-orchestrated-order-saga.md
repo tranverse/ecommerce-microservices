@@ -1,6 +1,6 @@
 # ADR 003: Use an Orchestrated Saga for Order Processing
 
-Status: **Accepted; Order outbox start and Inventory participant implemented, remaining saga adapters in progress**
+Status: **Accepted; Order/Inventory round trip implemented, Payment and completion adapters in progress**
 
 ## Context
 

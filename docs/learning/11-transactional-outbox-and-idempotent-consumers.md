@@ -34,6 +34,9 @@ sequenceDiagram
     I->>IDB: Reserve + inbox + outcome outbox
     IDB-->>I: One local commit
     I->>K: InventoryReserved or Failed
+    K->>O: Inventory outcome
+    O->>ODB: State transition + inbox + next outbox
+    ODB-->>O: One local commit
 ```
 
 The outbox closes the database-before-Kafka crash window. A scheduler publishes rows after the business transaction commits. It marks a row published only after the broker acknowledges it.
@@ -43,6 +46,8 @@ The outbox closes the database-before-Kafka crash window. A scheduler publishes 
 Suppose Kafka acknowledges the event, then the service crashes before `published_at` commits. On restart, the same outbox row is published again. Kafka producer idempotence reduces protocol-level duplicates within a producer session, but it does not atomically commit PostgreSQL and Kafka.
 
 Consumers must therefore assume at-least-once delivery. Inventory stores the input `eventId` in `processed_events` in the same transaction as its stock change. A redelivery finds that inbox row and becomes a no-op.
+
+Order applies the same rule when consuming Inventory outcomes. It locks the order row so competing outcomes for one order cannot both pass the state check. On success, the order transition, inbox row, and `PaymentRequested` outbox row commit together. On failure, cancellation, inbox, and `OrderCancelled` commit together. The state machine is a second idempotency barrier: a different event ID for an already-applied transition does not create another command.
 
 ## Transaction Boundaries
 

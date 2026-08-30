@@ -2,7 +2,7 @@
 
 Order Service owns customer orders, immutable product snapshots, totals, idempotent order acceptance, and the order lifecycle state machine. It does not own catalog data, inventory quantities, payment attempts, credentials, or customer profiles.
 
-Authenticated order creation, customer-owned reads, and the first durable saga command are implemented. New orders remain `PENDING`; Inventory processes the command, while Order outcome handling and Payment progression are the next workflow milestone.
+Authenticated order creation, customer-owned reads, the first durable saga command, and Inventory outcome handling are implemented. New orders begin `PENDING`; an `InventoryReserved` outcome moves them to `PAYMENT_PENDING` and creates `PaymentRequested`, while `InventoryReservationFailed` cancels them and creates `OrderCancelled`. The Payment Kafka adapter is the next workflow milestone.
 
 ## API
 
@@ -62,6 +62,20 @@ The order and first inventory command share one local PostgreSQL transaction. A 
 
 A broker acknowledgment followed by a process crash before the database update can still cause duplicate publication. This is intentional at-least-once behavior; Inventory's processed-event inbox makes the command idempotent. Kafka producer idempotence alone cannot atomically commit Kafka and `order_db`.
 
+## Inventory Outcome Consumer
+
+The Kafka listener accepts only strict v1 `InventoryReserved` and `InventoryReservationFailed` envelopes. The Kafka key, aggregate ID, and payload order ID must match. Unknown fields, unsupported versions, malformed correlation IDs, and mismatched identifiers are rejected instead of allowing silent contract drift.
+
+For each valid outcome, Order locks the order row and performs one local transaction:
+
+- reservation success: `PENDING -> INVENTORY_RESERVED -> PAYMENT_PENDING`, inbox insert, and `PaymentRequested` outbox insert;
+- reservation failure: `PENDING -> CANCELLED`, inbox insert, and `OrderCancelled` outbox insert;
+- exact redelivery: no state or outbox change;
+- already-applied transition with a new event ID: record the input, but do not emit a duplicate command;
+- contradictory outcome: roll back and send the poison message to the DLT.
+
+Technical failures use bounded exponential retry. Invalid contracts and deterministic state conflicts skip retry because waiting cannot make them valid.
+
 ## Failure Behavior
 
 - Product unavailable or timed out: `503 PRODUCT_CATALOG_UNAVAILABLE`; no order is persisted.
@@ -93,6 +107,9 @@ Detail/idempotency queries use an entity graph to fetch items in one query. Pagi
 | `ORDER_PRODUCT_CONNECT_TIMEOUT` | No | `PT2S` |
 | `ORDER_PRODUCT_READ_TIMEOUT` | No | `PT3S` |
 | `KAFKA_BOOTSTRAP_SERVERS` | No | `localhost:9092` |
+| `ORDER_KAFKA_CONSUMER_GROUP` | No | `order-service-v1` |
+| `INVENTORY_EVENTS_TOPIC` | No | `inventory.events.v1` |
+| `SAGA_MESSAGING_LISTENER_ENABLED` | No | `true` |
 | `OUTBOX_PUBLISHER_ENABLED` | No | `true` |
 | `SERVER_PORT` | No | `8085` |
 
@@ -107,6 +124,6 @@ From the repository root:
 docker build -f services/order-service/Dockerfile -t ecommerce/order-service:local .
 ```
 
-The 25 tests cover aggregate transitions/invariants, repository constraints and fetch behavior on PostgreSQL 17.6, request canonicalization, Product contract/failure mapping, idempotency races, MVC security/validation, ownership, Flyway, the full HTTP/persistence flow, outbox retry behavior, and real Kafka publication.
+The 37 tests cover aggregate transitions/invariants, repository constraints and fetch behavior on PostgreSQL 17.6, request canonicalization, Product contract/failure mapping, idempotency races, MVC security/validation, ownership, Flyway, strict event parsing, saga transition/rollback behavior, outbox/inbox semantics, and real Kafka/PostgreSQL flows.
 
 The multi-stage image contains a Java 21 JRE runtime, runs as the non-root `spring` user, has a readiness health check, and uses container memory-aware JVM settings.

@@ -59,6 +59,29 @@ The second key check plus database uniqueness handles the race where two identic
 | Concurrent duplicate insert | Read committed winner | DB unique constraint closes race |
 | Another customer reads order | `404` | Enforce ownership without leaking existence |
 
-## Implemented Asynchronous Start
+## Implemented Asynchronous Saga Progression
 
-The accepted `PENDING` order writes an outbox command in the same local transaction. A scheduled publisher sends it to `inventory.commands.v1` and marks the row published only after broker acknowledgment. Inventory already consumes the command and publishes an outcome. Returning `202` represents accepted workflow state, not a false claim that reservation/payment already completed; Order outcome handling and Payment progression remain pending.
+The accepted `PENDING` order writes an outbox command in the same local transaction. A scheduled publisher sends it to `inventory.commands.v1` and marks the row published only after broker acknowledgment. Inventory consumes the command and publishes an outcome.
+
+```mermaid
+sequenceDiagram
+    participant K as Kafka
+    participant O as Order Service
+    participant D as order_db
+
+    K->>O: InventoryReserved or InventoryReservationFailed
+    O->>O: Validate v1 envelope, key, and payload
+    O->>D: Lock order by orderId
+    alt eventId already in inbox
+        O->>O: Ignore exact redelivery
+    else reservation succeeded
+        O->>D: PAYMENT_PENDING + inbox + PaymentRequested outbox
+    else reservation failed
+        O->>D: CANCELLED + inbox + OrderCancelled outbox
+    end
+    D-->>O: One local commit
+```
+
+The inbox record, order transition, and next outbox message share one transaction. A crash cannot leave a changed order without its next durable command. Exact redelivery is ignored by `eventId`; a new event ID describing a transition already applied is also recorded without emitting another command. Contradictory outcomes are sent to the DLT rather than silently rewriting history.
+
+Returning `202` still represents accepted workflow state, not a claim that the whole purchase completed. A successful reservation now reaches `PAYMENT_PENDING`; connecting `PaymentRequested` to Payment is the next saga phase.

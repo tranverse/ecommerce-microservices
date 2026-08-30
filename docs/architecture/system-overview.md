@@ -8,7 +8,7 @@ The platform supports a customer journey from registration and login through pro
 
 ## Current state
 
-API Gateway, Auth, User, Product, Inventory, Order acceptance, and Payment's core application workflow are implemented, containerized, tested, and documented. Gateway routes Order traffic and applies coarse roles; Order validates Auth JWTs again, scopes data to `sub`, obtains trusted Product snapshots through one bounded batch call, and commits the order plus its first saga command only to `order_db`. Its outbox publishes `InventoryReservationRequested`. Inventory consumes that command idempotently in `inventory_db` and publishes `InventoryReserved` or `InventoryReservationFailed` from its own outbox. Payment independently owns `payment_db`, idempotent charge/refund state, and a simulated processor adapter. New orders remain `PENDING` because Order outcome handling and the Payment Kafka adapter are not implemented yet. Product and Inventory management APIs still need their own resource-server enforcement before direct exposure is safe. Registration-to-profile auto-provisioning is also pending. A component is not considered implemented until its code, tests, runtime configuration, and documentation are present.
+API Gateway, Auth, User, Product, Inventory, Order acceptance and Inventory-outcome orchestration, and Payment's core application workflow are implemented, containerized, tested, and documented. Gateway routes Order traffic and applies coarse roles; Order validates Auth JWTs again, scopes data to `sub`, obtains trusted Product snapshots through one bounded batch call, and commits the order plus its first saga command only to `order_db`. Its outbox publishes `InventoryReservationRequested`. Inventory consumes that command idempotently in `inventory_db` and publishes `InventoryReserved` or `InventoryReservationFailed` from its own outbox. Order validates and records the outcome in its inbox: success atomically moves the order to `PAYMENT_PENDING` and creates `PaymentRequested`; failure moves it to `CANCELLED` and creates `OrderCancelled`. Payment independently owns `payment_db`, idempotent charge/refund state, and a simulated processor adapter, but its Kafka adapter is not implemented yet. Product and Inventory management APIs still need their own resource-server enforcement before direct exposure is safe. Registration-to-profile auto-provisioning is also pending. A component is not considered implemented until its code, tests, runtime configuration, and documentation are present.
 
 ## Target architecture
 
@@ -86,8 +86,9 @@ sequenceDiagram
     O-->>K: InventoryReservationRequested (implemented)
     K->>I: Reserve inventory (implemented)
     I->>K: InventoryReserved or InventoryReservationFailed (implemented)
-    K->>O: Reservation result (adapter pending)
-    O->>K: PaymentRequested when reserved
+    K->>O: Reservation result (implemented)
+    O->>O: Inbox + state transition + next outbox (implemented)
+    O->>K: PaymentRequested when reserved (implemented)
     K->>Pay: Process simulated payment (adapter pending; core ready)
     Pay->>K: PaymentCompleted or PaymentFailed (pending)
     K->>O: Payment result
@@ -95,7 +96,7 @@ sequenceDiagram
     K->>N: Customer notification event
 ```
 
-Synchronous acceptance through `202`, the durable Order-to-Inventory Kafka step, and Payment's local idempotent workflow are implemented. Order outcome handling and subsequent saga steps remain pending. A local `@Transactional` method cannot atomically update Order, Inventory, and Payment databases; each implemented participant uses a local transaction plus outbox/inbox records.
+Synchronous acceptance through `202`, the durable Order-to-Inventory-to-Order Kafka loop, and Payment's local idempotent workflow are implemented. The Payment Kafka participant and Order's payment-outcome/compensation transitions remain pending. A local `@Transactional` method cannot atomically update Order, Inventory, and Payment databases; each implemented participant uses a local transaction plus outbox/inbox records.
 
 ## Deployment view
 
