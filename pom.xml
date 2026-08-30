@@ -43,5 +43,6 @@
         <module>services/auth-service</module>
         <module>services/user-service</module>
         <module>services/api-gateway</module>
+        <module>services/order-service</module>
     </modules>
 </project>
