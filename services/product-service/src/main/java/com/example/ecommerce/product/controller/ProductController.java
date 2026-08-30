@@ -29,6 +29,8 @@ import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 
 import java.math.BigDecimal;
 import java.net.URI;
+import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 @RestController
@@ -58,6 +60,14 @@ public class ProductController {
     @Operation(summary = "Get a product by ID")
     public ProductResponse getProduct(@PathVariable UUID productId) {
         return productService.getProduct(productId);
+    }
+
+    @GetMapping("/batch")
+    @Operation(summary = "Get up to 50 products by ID in one request")
+    public List<ProductResponse> getProducts(
+            @RequestParam("ids") @Size(min = 1, max = 50) Set<UUID> productIds
+    ) {
+        return productService.getProducts(productIds);
     }
 
     @GetMapping

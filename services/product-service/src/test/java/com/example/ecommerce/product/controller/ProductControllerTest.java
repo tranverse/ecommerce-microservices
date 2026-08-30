@@ -13,6 +13,7 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 import static org.hamcrest.Matchers.hasItem;
@@ -92,6 +93,34 @@ class ProductControllerTest {
                 .andExpect(jsonPath("$.status").value(404))
                 .andExpect(jsonPath("$.details").isArray())
                 .andExpect(jsonPath("$.trace").doesNotExist());
+    }
+
+    @Test
+    void returnsProductsInABatch() throws Exception {
+        UUID firstProductId = UUID.randomUUID();
+        UUID secondProductId = UUID.randomUUID();
+        when(productService.getProducts(any())).thenReturn(List.of(
+                response(firstProductId),
+                response(secondProductId)
+        ));
+
+        mockMvc.perform(get("/api/v1/products/batch")
+                        .param("ids", firstProductId.toString(), secondProductId.toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(2))
+                .andExpect(jsonPath("$[0].id").value(firstProductId.toString()))
+                .andExpect(jsonPath("$[1].id").value(secondProductId.toString()));
+    }
+
+    @Test
+    void rejectsMoreThanFiftyBatchIds() throws Exception {
+        String[] productIds = java.util.stream.IntStream.range(0, 51)
+                .mapToObj(ignored -> UUID.randomUUID().toString())
+                .toArray(String[]::new);
+
+        mockMvc.perform(get("/api/v1/products/batch").param("ids", productIds))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errorCode").value("VALIDATION_ERROR"));
     }
 
     @Test
