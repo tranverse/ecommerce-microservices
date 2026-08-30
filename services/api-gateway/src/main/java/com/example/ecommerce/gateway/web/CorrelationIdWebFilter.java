@@ -27,6 +27,10 @@ public class CorrelationIdWebFilter implements WebFilter, Ordered {
         ServerWebExchange mutatedExchange = exchange.mutate().request(request).build();
         mutatedExchange.getAttributes().put(ATTRIBUTE_NAME, correlationId);
         mutatedExchange.getResponse().getHeaders().set(HEADER_NAME, correlationId);
+        mutatedExchange.getResponse().beforeCommit(() -> {
+            mutatedExchange.getResponse().getHeaders().set(HEADER_NAME, correlationId);
+            return Mono.empty();
+        });
         return chain.filter(mutatedExchange)
                 .contextWrite(context -> context.put(ATTRIBUTE_NAME, correlationId));
     }

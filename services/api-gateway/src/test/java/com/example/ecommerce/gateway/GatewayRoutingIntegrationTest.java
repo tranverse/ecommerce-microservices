@@ -50,6 +50,7 @@ class GatewayRoutingIntegrationTest {
                         spoofedIdentityPresent
                 );
                 return response.header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
+                        .header("X-Correlation-ID", correlationId)
                         .sendString(Mono.just(body));
             })
             .bindNow();
@@ -97,7 +98,8 @@ class GatewayRoutingIntegrationTest {
                 .bodyValue("{\"email\":\"user@example.com\",\"password\":\"not-forwarded-to-logs\"}")
                 .exchange()
                 .expectStatus().isOk()
-                .expectHeader().valueEquals("X-Correlation-ID", "gateway-public-auth")
+                .expectHeader().values("X-Correlation-ID", values ->
+                        assertThat(values).containsExactly("gateway-public-auth"))
                 .expectHeader().valueEquals("X-Content-Type-Options", "nosniff")
                 .expectBody()
                 .jsonPath("$.path").isEqualTo("/api/v1/auth/login")
