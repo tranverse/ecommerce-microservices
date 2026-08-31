@@ -1,6 +1,6 @@
 # Service Communication
 
-Status: **Accepted; synchronous Product lookup, Order/Inventory Kafka flow, and Payment's idempotent processor boundary are implemented. Remaining Kafka adapters are in progress.**
+Status: **Accepted; synchronous Product lookup and Kafka participants through Payment outcome publication are implemented. Order completion/compensation adapters remain in progress.**
 
 ## Decision policy
 
@@ -14,7 +14,7 @@ Use synchronous HTTP when the caller cannot continue without an immediate, autho
 | Order to Payment | Kafka command/event | Payment is a long-running, failure-prone saga step | Order remains in payment state; duplicate commands are idempotent |
 | Order result to Notification | Kafka event | Notification must not block business completion | Consumer retries safely and records delivery failure |
 
-Payment exposes no public business route. Its Kafka consumer will invoke the application workflow, while its provider adapter remains an outbound dependency. Provider calls use `paymentId` as an idempotency key and run outside database transactions.
+Payment exposes no public business route. Its Kafka consumer invokes the application workflow, while its provider adapter remains an outbound dependency. Provider calls use `paymentId` as an idempotency key and run outside database transactions. The terminal payment update, processed input, and outcome outbox share one local transaction.
 
 ## Synchronous standards
 

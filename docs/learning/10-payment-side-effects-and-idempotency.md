@@ -45,15 +45,13 @@ The implementation uses:
 
 1. a short transaction to create or find `PENDING`;
 2. the provider call outside a database transaction;
-3. a short transaction with a row lock to apply the outcome.
+3. a short transaction with a row lock to apply the outcome and persist the inbox/outbox records.
 
-The lock protects concurrent state transitions, not the network call. The processor contract protects repeated side effects.
+The lock protects concurrent state transitions, not the network call. The processor contract protects repeated side effects. The third transaction commits `COMPLETED`/`FAILED`, the processed `PaymentRequested` event, and `PaymentCompleted`/`PaymentFailed` outbox row together.
 
 ## Questions to Reason About
 
 1. If a provider does not support idempotency keys, what reconciliation data would you need before retrying?
 2. Why is `orderId` uniqueness insufficient as the provider idempotency key when two services assign identifiers independently?
 3. Should a refund failure cancel an already confirmed order, or create a separate operational state?
-4. Where will `PaymentCompleted` be persisted so a crash cannot lose the event after committing `COMPLETED`?
-
-The answer to question 4 motivates the transactional outbox in the next milestone.
+4. Why must the terminal payment state, inbox, and outcome outbox commit together after the provider returns?

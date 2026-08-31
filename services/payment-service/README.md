@@ -2,7 +2,7 @@
 
 Payment Service owns simulated charge/refund attempts, provider references, payment state, and payment idempotency. It does not own the order lifecycle, inventory, customer credentials, or catalog prices.
 
-The current milestone implements the domain, PostgreSQL persistence, processor port, deterministic local simulator, and retry-safe application workflow. The Kafka command/event adapter is intentionally deferred to the saga milestone. There is no public business controller and Payment is not routed through API Gateway.
+The current milestone implements the domain, PostgreSQL persistence, processor port, deterministic local simulator, retry-safe application workflow, and Kafka saga adapter. Payment consumes `PaymentRequested` and publishes `PaymentCompleted` or `PaymentFailed`. There is no public business controller and Payment is not routed through API Gateway.
 
 ## Why This Is a Separate Service
 
@@ -30,12 +30,18 @@ Technical provider failures leave the payment retryable: a failed charge call ke
 ```text
 short DB transaction: create/find PENDING payment
         -> provider call outside DB transaction
-short DB transaction: lock row and apply outcome
+short DB transaction: lock row + apply outcome + inbox + outcome outbox
 ```
 
 The processor receives `paymentId` as its idempotency key. If the process crashes after the provider approves but before Payment DB records the outcome, redelivery uses the same key. A compliant provider returns the same outcome/reference instead of charging twice.
 
-One `orderId` can own only one payment. A replay with the same amount/currency returns the existing outcome; reuse with different commercial data is rejected as a conflict. Database uniqueness is the final concurrency guard.
+One `orderId` can own only one payment. A replay with the same amount/currency returns the existing outcome; reuse with different commercial data is rejected as a conflict. Database uniqueness is the final concurrency guard. An exact Kafka redelivery is stopped by the inbox, while a semantically duplicate command with a new event ID records the input without creating another outcome.
+
+## Kafka Boundary
+
+The listener accepts only strict `PaymentRequested` v1 envelopes. Kafka key, aggregate ID, and payload order ID must agree; amount and currency must satisfy the same monetary contract as the domain. Unknown fields and unsupported versions go directly to the DLT.
+
+Provider unavailability is retried with bounded exponential backoff and the same durable `paymentId`. A known decline is not retried: it commits `FAILED`, the inbox record, and `PaymentFailed` outbox together. The outbox publisher marks messages only after broker acknowledgment and retains failures with bounded backoff.
 
 See [Payment Processing Flow](../../docs/flows/payment-processing-flow.md) and [ADR 008](../../docs/decisions/008-payment-processor-idempotency.md).
 
@@ -71,6 +77,11 @@ There is deliberately no foreign key to `order_db`. Hibernate uses `ddl-auto=val
 | `PAYMENT_DB_MIN_IDLE` | No | `2` |
 | `PAYMENT_SIMULATOR_DECLINE_PAYMENTS` | No | `false` |
 | `PAYMENT_SIMULATOR_UNAVAILABLE` | No | `false` |
+| `KAFKA_BOOTSTRAP_SERVERS` | No | `localhost:9092` |
+| `PAYMENT_KAFKA_CONSUMER_GROUP` | No | `payment-service-v1` |
+| `PAYMENT_COMMANDS_TOPIC` | No | `payment.commands.v1` |
+| `SAGA_MESSAGING_LISTENER_ENABLED` | No | `true` |
+| `OUTBOX_PUBLISHER_ENABLED` | No | `true` |
 | `SERVER_PORT` | No | `8086` |
 
 Never enable both simulator failure switches as application policy in production. They exist for local failure exercises until a real provider sandbox is introduced.
@@ -84,6 +95,6 @@ From the repository root:
 docker build -f services/payment-service/Dockerfile -t ecommerce/payment-service:local .
 ```
 
-The 19 tests cover aggregate transitions, monetary validation, Flyway/database constraints, idempotent approval/decline/refund behavior, processor outage recovery, provider-contract checks, and the deterministic simulator on PostgreSQL 17.6.
+The 33 tests cover aggregate transitions, monetary validation, Flyway/database constraints, idempotent approval/decline/refund behavior, provider outage recovery and contract checks, strict event parsing, transactional outbox/inbox behavior, and real Kafka/PostgreSQL flows.
 
 The multi-stage image contains a Java 21 JRE runtime, runs as the non-root `spring` user, exposes only actuator endpoints in this milestone, and checks readiness on port `8086`.

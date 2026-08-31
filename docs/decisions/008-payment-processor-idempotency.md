@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted and implemented in the Payment application workflow. Kafka adapters remain pending.
+Accepted and implemented in the Payment application workflow and Kafka saga adapter.
 
 ## Context
 

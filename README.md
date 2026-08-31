@@ -2,7 +2,7 @@
 
 A production-style Java 21 and Spring Boot 3 e-commerce system built incrementally as both a runnable distributed application and a practical microservices course.
 
-> **Implementation status:** API Gateway, Auth, User, Product, Inventory, Order acceptance, and the Payment domain/application workflow are implemented, containerized, and verified. The Kafka saga now runs from Order to Inventory and back to Order: reservation success advances the order and emits `PaymentRequested`, while reservation failure cancels it. The Payment Kafka adapter, automatic profile provisioning, and Notification remain planned milestones.
+> **Implementation status:** API Gateway, Auth, User, Product, Inventory, Order, and Payment are implemented, containerized, and verified through the current saga stage. The Kafka workflow now reaches Payment and durably emits `PaymentCompleted` or `PaymentFailed`. Order's payment-outcome/compensation adapter, automatic profile provisioning, and Notification remain planned milestones.
 
 ## Project Overview
 
@@ -64,7 +64,7 @@ The complete design and current-state warning are maintained in [System Overview
 | Product Service | Catalog, current prices, filtering and management | Implemented |
 | Inventory Service | Stock, reservations, releases and concurrency | REST API and Kafka saga participant implemented |
 | Order Service | Authenticated orders, immutable item snapshots and saga orchestration | Acceptance, outbox/inbox, and Inventory outcome handling implemented |
-| Payment Service | Idempotent simulated charges, declines, outage recovery and refunds | Core workflow implemented; Kafka adapter pending |
+| Payment Service | Idempotent simulated charges, declines, outage recovery and refunds | Core workflow and Kafka saga participant implemented |
 | Notification Service | Asynchronous notification history and delivery simulation | Planned |
 
 Detailed ownership and prohibited coupling are documented in [Service Boundaries](docs/architecture/service-boundaries.md).
@@ -80,7 +80,7 @@ Detailed ownership and prohibited coupling are documented in [Service Boundaries
 | Flyway | Versioned, reviewable service-owned schema migrations | Active in Auth, User, Product, Inventory, Order, and Payment |
 | Spring Security and JWT | Auth lifecycle, public JWKS, local token validation | Active in Auth, User, Order, and Gateway; other services pending |
 | Spring Cloud Gateway | Reactive edge routing without business logic | Active |
-| Kafka | Durable asynchronous saga communication and notifications | Active for Order-to-Inventory-to-Order flow; remaining adapters pending |
+| Kafka | Durable asynchronous saga communication and notifications | Active through Payment outcomes; Order completion/compensation pending |
 | Testcontainers | Integration tests against real PostgreSQL/Kafka behavior | Active for PostgreSQL and Kafka |
 | Resilience4j | Bounded failure handling for justified synchronous calls | Planned |
 | Micrometer/OpenTelemetry | Metrics and distributed traces | Planned |
@@ -191,13 +191,13 @@ The order endpoint validates products synchronously through one bounded batch ca
 
 ## Saga
 
-Order Service orchestrates the saga because it owns the customer-visible lifecycle and state machine. Its first durable command, the Inventory participant, and Order's Inventory-outcome transition are implemented. Inventory failure cancels the order. The next phase connects `PaymentRequested` to Payment; a later payment failure will request an inventory release and then cancel the order. Notification will react only after a durable business outcome.
+Order Service orchestrates the saga because it owns the customer-visible lifecycle and state machine. Its first durable command, the Inventory round trip, and the Payment participant are implemented. Inventory failure cancels the order. The next phase lets Order consume Payment outcomes: success will confirm inventory and the order, while failure will request an inventory release and cancel the order. Notification will react only after a durable business outcome.
 
 The decision and trade-offs are in [ADR 003](docs/decisions/003-orchestrated-order-saga.md). Detailed flow documentation will be added with the implementation.
 
 ## Payment Workflow
 
-Payment Service now persists one payment per opaque Order ID and implements `PENDING -> COMPLETED`, `PENDING -> FAILED`, and `COMPLETED -> REFUNDED` rules. Provider calls run outside database transactions and use the durable Payment ID as an idempotency key, making ambiguous charge/refund retries safe. Business declines are terminal; technical outages preserve a retryable state. The service intentionally has no public business endpoint because the next milestone will attach it to Kafka as a saga participant. See [Payment Service](services/payment-service/README.md) and [Payment Processing Flow](docs/flows/payment-processing-flow.md).
+Payment Service persists one payment per opaque Order ID and implements `PENDING -> COMPLETED`, `PENDING -> FAILED`, and `COMPLETED -> REFUNDED` rules. It now consumes strict `PaymentRequested` v1 commands and publishes terminal outcomes through its transactional outbox. Provider calls run outside database transactions and use the durable Payment ID as an idempotency key, making ambiguous retries safe. Business declines are terminal; technical outages preserve a retryable state and leave the Kafka input unprocessed. See [Payment Service](services/payment-service/README.md) and [Payment Processing Flow](docs/flows/payment-processing-flow.md).
 
 ## Reliability
 
@@ -576,7 +576,7 @@ Run every implemented service suite:
 .\mvnw.cmd test
 ```
 
-Product has 20 tests, Inventory has 28 including concurrent reservation and real Kafka/PostgreSQL flows, Auth has 15 covering cryptography/token lifecycle, User has 17 covering resource-server security and ownership, Gateway has 9 covering routing and edge behavior, Order has 37 covering acceptance, outbox/inbox, strict event parsing, state transitions, and real Kafka/PostgreSQL flows, and Payment has 19 covering state transitions, database constraints, retry/refund semantics, and processor behavior. The implemented reactor currently has 145 tests. Each service uses the smallest meaningful combination of unit, controller, repository, integration, security, proxy, and Testcontainers tests.
+Product has 20 tests, Inventory has 28 including concurrent reservation and real Kafka/PostgreSQL flows, Auth has 15 covering cryptography/token lifecycle, User has 17 covering resource-server security and ownership, Gateway has 9 covering routing and edge behavior, Order has 37 covering acceptance, outbox/inbox, strict event parsing, state transitions, and real Kafka/PostgreSQL flows, and Payment has 33 covering state transitions, database constraints, provider retry/refund semantics, strict event contracts, outbox/inbox behavior, and real Kafka/PostgreSQL flows. The implemented reactor currently has 159 tests. Each service uses the smallest meaningful combination of unit, controller, repository, integration, security, proxy, and Testcontainers tests.
 
 ## Documentation
 

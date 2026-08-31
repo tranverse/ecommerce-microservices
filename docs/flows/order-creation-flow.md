@@ -84,4 +84,4 @@ sequenceDiagram
 
 The inbox record, order transition, and next outbox message share one transaction. A crash cannot leave a changed order without its next durable command. Exact redelivery is ignored by `eventId`; a new event ID describing a transition already applied is also recorded without emitting another command. Contradictory outcomes are sent to the DLT rather than silently rewriting history.
 
-Returning `202` still represents accepted workflow state, not a claim that the whole purchase completed. A successful reservation now reaches `PAYMENT_PENDING`; connecting `PaymentRequested` to Payment is the next saga phase.
+Returning `202` still represents accepted workflow state, not a claim that the whole purchase completed. A successful reservation reaches `PAYMENT_PENDING`, and Payment now consumes the resulting command and publishes a durable outcome. Order consuming that payment outcome is the next saga phase.

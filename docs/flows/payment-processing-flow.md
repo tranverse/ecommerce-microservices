@@ -1,27 +1,28 @@
 # Payment Processing Flow
 
-Status: **Payment application workflow implemented; Kafka delivery and outcome publication pending.**
+Status: **Payment Kafka participant and outcome publication implemented.**
 
 ## Successful Charge
 
 ```mermaid
 sequenceDiagram
-    participant K as Kafka consumer (next milestone)
-    participant A as PaymentApplicationService
+    participant K as Kafka
+    participant A as Payment saga handler
     participant DB as payment_db
     participant P as PaymentProcessor
 
-    K->>A: ProcessPayment(orderId, amount, currency)
+    K->>A: PaymentRequested v1
+    A->>A: Validate envelope, key, amount, currency
     A->>DB: tx1: create/find payment by orderId
     DB-->>A: PENDING paymentId
     A->>P: charge(paymentId as idempotency key)
     P-->>A: APPROVED + stable provider reference
-    A->>DB: tx2: lock payment and mark COMPLETED
+    A->>DB: tx2: lock + COMPLETED + inbox + outcome outbox
     DB-->>A: durable COMPLETED payment
-    A-->>K: result for PaymentCompleted publication
+    A-->>K: PaymentCompleted from outbox publisher
 ```
 
-The Kafka boxes describe the next adapter; the application flow between service, database, and processor already exists.
+The provider call is deliberately between the two database transactions. The second transaction makes the payment result, processed command, and next event indivisible inside `payment_db`.
 
 ## Idempotent Replay
 
@@ -36,6 +37,7 @@ Reusing an `orderId` with a different amount or currency is a conflict. This pre
 | Provider business decline | `FAILED` with `DECLINED` | Terminal replay; do not call provider again |
 | Provider unavailable during charge | `PENDING` | Retry charge with the same `paymentId` |
 | Crash after charge but before tx2 | `PENDING` | Provider idempotency returns the original result, then tx2 applies it |
+| Crash after tx2 but before Kafka acknowledgment | Terminal state + unpublished/published outbox | Publisher retries; Order inbox will suppress duplicates |
 | Provider returns a different reference for an existing completion | Existing terminal state | Reject as a processor contract violation |
 | Provider unavailable during refund | `COMPLETED` | Retry refund with the same `paymentId` |
 | Concurrent duplicate initialization | One row wins unique `order_id` | Loser reads and reuses the winning payment |
@@ -59,4 +61,4 @@ Refund is valid only from `COMPLETED`. Replaying a completed refund returns the 
 
 ## Why No Long Database Transaction
 
-Holding a database transaction open across a provider call consumes a connection and keeps locks while latency is uncontrolled. It still cannot roll back a real provider charge. Two short local transactions make the non-atomic boundary explicit; stable idempotency closes the crash window operationally.
+Holding a database transaction open across a provider call consumes a connection and keeps locks while latency is uncontrolled. It still cannot roll back a real provider charge. Two short local transactions make the non-atomic boundary explicit; stable provider idempotency closes the charge crash window, while the inbox/outbox closes the local-state-to-Kafka publication window.
