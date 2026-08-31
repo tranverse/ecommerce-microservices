@@ -8,7 +8,7 @@ The platform supports a customer journey from registration and login through pro
 
 ## Current state
 
-API Gateway, Auth, User, Product, Inventory, Order acceptance and Inventory-outcome orchestration, and the Payment saga participant are implemented, containerized, tested, and documented. Gateway routes Order traffic and applies coarse roles; Order validates Auth JWTs again, scopes data to `sub`, obtains trusted Product snapshots through one bounded batch call, and commits the order plus its first saga command only to `order_db`. Inventory consumes the reservation command idempotently and publishes an outcome from `inventory_db`. Order records that outcome in its inbox: success atomically moves the order to `PAYMENT_PENDING` and creates `PaymentRequested`; failure moves it to `CANCELLED` and creates `OrderCancelled`. Payment consumes the command, calls its idempotent provider port outside a database transaction, then atomically commits the terminal payment state, inbox, and `PaymentCompleted` or `PaymentFailed` outbox in `payment_db`. Order's payment-outcome and compensation transitions remain pending. Product and Inventory management APIs still need their own resource-server enforcement before direct exposure is safe. Registration-to-profile auto-provisioning is also pending. A component is not considered implemented until its code, tests, runtime configuration, and documentation are present.
+API Gateway, Auth, User, Product, Inventory, Order orchestration, and the Payment saga participant are implemented, containerized, tested, and documented. Gateway routes Order traffic and applies coarse roles; Order validates Auth JWTs again, scopes data to `sub`, obtains trusted Product snapshots through one bounded batch call, and commits the order plus its first saga command only to `order_db`. Inventory consumes reservation and status commands idempotently from `inventory_db`. Order records Inventory outcomes in its inbox: success atomically moves the order to `PAYMENT_PENDING` and creates `PaymentRequested`; reservation failure cancels it. Payment calls its idempotent provider port outside a database transaction, then atomically commits the terminal payment state, inbox, and `PaymentCompleted` or `PaymentFailed` outbox in `payment_db`. Order consumes that outcome: success confirms the order and requests inventory confirmation, while failure cancels the order and requests inventory release. Product and Inventory management APIs still need their own resource-server enforcement before direct exposure is safe. Registration-to-profile auto-provisioning and Notification are pending. A component is not considered implemented until its code, tests, runtime configuration, and documentation are present.
 
 ## Target architecture
 
@@ -91,12 +91,15 @@ sequenceDiagram
     O->>K: PaymentRequested when reserved (implemented)
     K->>Pay: Process simulated payment (implemented)
     Pay->>K: PaymentCompleted or PaymentFailed (implemented)
-    K->>O: Payment result (adapter pending)
-    O->>K: OrderConfirmed or compensation commands
+    K->>O: Payment result (implemented)
+    O->>O: Inbox + terminal state + outbox rows (implemented)
+    O->>K: InventoryConfirmationRequested or InventoryReleaseRequested (implemented)
+    O->>K: OrderConfirmed or OrderCancelled (implemented)
+    K->>I: Confirm or release reservation (implemented)
     K->>N: Customer notification event
 ```
 
-Synchronous acceptance through `202`, the durable Inventory round trip, and the Payment Kafka participant are implemented. Order's payment-outcome, confirmation, and compensation transitions remain pending. A local `@Transactional` method cannot atomically update Order, Inventory, and Payment databases; each implemented participant uses a local transaction plus outbox/inbox records.
+Synchronous acceptance through `202` and the asynchronous saga through a terminal Order state are implemented. A local `@Transactional` method cannot atomically update Order, Inventory, and Payment databases; each participant uses a local transaction plus outbox/inbox records. Payment failure is compensated by a new durable inventory-release command rather than a cross-database rollback.
 
 ## Deployment view
 

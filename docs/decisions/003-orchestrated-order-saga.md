@@ -1,6 +1,6 @@
 # ADR 003: Use an Orchestrated Saga for Order Processing
 
-Status: **Accepted; Order/Inventory round trip implemented, Payment and completion adapters in progress**
+Status: **Accepted; implemented through terminal confirmation and payment-failure compensation**
 
 ## Context
 

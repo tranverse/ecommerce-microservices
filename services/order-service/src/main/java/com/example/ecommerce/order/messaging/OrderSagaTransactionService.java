@@ -12,11 +12,13 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.util.List;
 
 @Service
 public class OrderSagaTransactionService {
 
-    public static final String CONSUMER_NAME = "order-inventory-outcome-v1";
+    public static final String INVENTORY_CONSUMER_NAME = "order-inventory-outcome-v1";
+    public static final String PAYMENT_CONSUMER_NAME = "order-payment-outcome-v1";
 
     private static final Logger log = LoggerFactory.getLogger(OrderSagaTransactionService.class);
 
@@ -52,7 +54,26 @@ public class OrderSagaTransactionService {
             case InventoryReservedOutcome reserved -> inventoryReserved(order, reserved);
             case InventoryReservationFailedOutcome failed -> inventoryReservationFailed(order, failed);
         };
-        processedEventRepository.save(ProcessedEvent.create(outcome, CONSUMER_NAME, Instant.now()));
+        processedEventRepository.save(ProcessedEvent.create(outcome, INVENTORY_CONSUMER_NAME, Instant.now()));
+        return result;
+    }
+
+    @Transactional
+    public OrderSagaProcessingResult handle(PaymentOutcome outcome) {
+        CustomerOrder order = orderRepository.findByIdForUpdate(outcome.orderId())
+                .orElseThrow(() -> new SagaOrderNotFoundException(outcome.orderId()));
+
+        if (processedEventRepository.existsById(outcome.eventId())) {
+            log.info("Ignored duplicate payment outcome eventId={} eventType={} orderId={}",
+                    outcome.eventId(), outcome.eventType(), outcome.orderId());
+            return OrderSagaProcessingResult.ALREADY_PROCESSED;
+        }
+
+        OrderSagaProcessingResult result = switch (outcome) {
+            case PaymentCompletedOutcome completed -> paymentCompleted(order, completed);
+            case PaymentFailedOutcome failed -> paymentFailed(order, failed);
+        };
+        processedEventRepository.save(ProcessedEvent.create(outcome, PAYMENT_CONSUMER_NAME, Instant.now()));
         return result;
     }
 
@@ -106,6 +127,60 @@ public class OrderSagaTransactionService {
         outboxEventRepository.save(eventFactory.orderCancelled(order, outcome.correlationId()));
         log.info("Cancelled order after inventory failure eventId={} orderId={} reason={}",
                 outcome.eventId(), outcome.orderId(), outcome.reason());
+        return OrderSagaProcessingResult.APPLIED;
+    }
+
+    private OrderSagaProcessingResult paymentCompleted(
+            CustomerOrder order,
+            PaymentCompletedOutcome outcome
+    ) {
+        OrderStatus currentStatus = order.getStatus();
+        if (currentStatus == OrderStatus.CONFIRMED) {
+            log.info("Ignored already-applied payment success eventId={} orderId={} paymentId={}",
+                    outcome.eventId(), outcome.orderId(), outcome.paymentId());
+            return OrderSagaProcessingResult.ALREADY_APPLIED;
+        }
+        if (currentStatus != OrderStatus.PAYMENT_PENDING) {
+            throw new ConflictingSagaOutcomeException(
+                    outcome.orderId(), currentStatus, outcome.eventType());
+        }
+
+        order.confirm();
+        outboxEventRepository.saveAll(List.of(
+                eventFactory.inventoryConfirmationRequested(order, outcome.correlationId()),
+                eventFactory.orderConfirmed(order, outcome.correlationId())
+        ));
+        log.info("Confirmed order after payment eventId={} orderId={} paymentId={}",
+                outcome.eventId(), outcome.orderId(), outcome.paymentId());
+        return OrderSagaProcessingResult.APPLIED;
+    }
+
+    private OrderSagaProcessingResult paymentFailed(
+            CustomerOrder order,
+            PaymentFailedOutcome outcome
+    ) {
+        OrderStatus currentStatus = order.getStatus();
+        if (currentStatus == OrderStatus.CANCELLED) {
+            if (order.getFailureReason() != OrderFailureReason.PAYMENT_FAILED) {
+                throw new ConflictingSagaOutcomeException(
+                        outcome.orderId(), currentStatus, outcome.eventType());
+            }
+            log.info("Ignored already-applied payment failure eventId={} orderId={} paymentId={} reason={}",
+                    outcome.eventId(), outcome.orderId(), outcome.paymentId(), outcome.reason());
+            return OrderSagaProcessingResult.ALREADY_APPLIED;
+        }
+        if (currentStatus != OrderStatus.PAYMENT_PENDING) {
+            throw new ConflictingSagaOutcomeException(
+                    outcome.orderId(), currentStatus, outcome.eventType());
+        }
+
+        order.cancel(OrderFailureReason.PAYMENT_FAILED);
+        outboxEventRepository.saveAll(List.of(
+                eventFactory.inventoryReleaseRequested(order, outcome.correlationId()),
+                eventFactory.orderCancelled(order, outcome.correlationId())
+        ));
+        log.info("Cancelled order after payment failure eventId={} orderId={} paymentId={} reason={}",
+                outcome.eventId(), outcome.orderId(), outcome.paymentId(), outcome.reason());
         return OrderSagaProcessingResult.APPLIED;
     }
 

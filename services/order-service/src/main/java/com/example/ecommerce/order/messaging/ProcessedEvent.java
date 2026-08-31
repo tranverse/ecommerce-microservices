@@ -40,6 +40,10 @@ public class ProcessedEvent {
         return new ProcessedEvent(outcome.eventId(), consumerName, outcome.eventType(), processedAt);
     }
 
+    public static ProcessedEvent create(PaymentOutcome outcome, String consumerName, Instant processedAt) {
+        return new ProcessedEvent(outcome.eventId(), consumerName, outcome.eventType(), processedAt);
+    }
+
     private static String requireText(String value, String field) {
         if (value == null || value.isBlank() || value.length() > 100) {
             throw new IllegalArgumentException(field + " must contain between 1 and 100 characters");

@@ -1,6 +1,6 @@
 # Service Communication
 
-Status: **Accepted; synchronous Product lookup and Kafka participants through Payment outcome publication are implemented. Order completion/compensation adapters remain in progress.**
+Status: **Accepted; synchronous Product lookup and the Kafka saga through terminal Order confirmation/compensation are implemented.**
 
 ## Decision policy
 
@@ -15,6 +15,8 @@ Use synchronous HTTP when the caller cannot continue without an immediate, autho
 | Order result to Notification | Kafka event | Notification must not block business completion | Consumer retries safely and records delivery failure |
 
 Payment exposes no public business route. Its Kafka consumer invokes the application workflow, while its provider adapter remains an outbound dependency. Provider calls use `paymentId` as an idempotency key and run outside database transactions. The terminal payment update, processed input, and outcome outbox share one local transaction.
+
+Order consumes Payment outcomes with the same at-least-once rules used for Inventory outcomes. A success changes the order and writes inventory-confirmation plus order-confirmed outbox rows in one `order_db` transaction. A decline writes the cancellation, inventory-release command, order-cancelled event, and inbox row together. No service writes another service's database.
 
 ## Synchronous standards
 

@@ -31,7 +31,7 @@ Catalog reads and stock reservations have different workloads and invariants. Pr
 
 Each service owns one local transaction boundary. Order coordinates business progress but cannot mutate Inventory or Payment tables. Inventory and Payment return outcomes through versioned events; Order applies valid state transitions and requests compensation when needed.
 
-Payment's local charge/refund workflow and Kafka saga participant are implemented. It stores `orderId` only as an opaque identifier, owns provider references, consumes `PaymentRequested`, emits terminal outcomes, and has no client-facing route.
+Payment's local charge/refund workflow and Kafka saga participant are implemented. It stores `orderId` only as an opaque identifier, owns provider references, consumes `PaymentRequested`, emits terminal outcomes, and has no client-facing route. Order consumes those outcomes and emits Inventory commands; it never changes a payment or reservation row directly.
 
 ### Notification
 

@@ -49,6 +49,8 @@ Consumers must therefore assume at-least-once delivery. Inventory stores the inp
 
 Order applies the same rule when consuming Inventory outcomes. It locks the order row so competing outcomes for one order cannot both pass the state check. On success, the order transition, inbox row, and `PaymentRequested` outbox row commit together. On failure, cancellation, inbox, and `OrderCancelled` commit together. The state machine is a second idempotency barrier: a different event ID for an already-applied transition does not create another command.
 
+The same pattern completes the Payment leg. Order locks a `PAYMENT_PENDING` order and commits either `CONFIRMED` plus two success outboxes, or `CANCELLED` plus two compensation/outcome outboxes. Because the state, inbox, and both outbox rows share one transaction, a crash cannot publish only half of the orchestrator's decision.
+
 ## Transaction Boundaries
 
 Successful reservation uses one local transaction:

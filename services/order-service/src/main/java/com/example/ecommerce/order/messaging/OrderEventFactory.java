@@ -2,6 +2,7 @@ package com.example.ecommerce.order.messaging;
 
 import com.example.ecommerce.order.domain.CustomerOrder;
 import com.example.ecommerce.order.domain.OrderFailureReason;
+import com.example.ecommerce.order.domain.OrderStatus;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.MDC;
@@ -18,7 +19,10 @@ public class OrderEventFactory {
     public static final String PAYMENT_COMMANDS_TOPIC = "payment.commands.v1";
     public static final String ORDER_EVENTS_TOPIC = "order.events.v1";
     public static final String INVENTORY_RESERVATION_REQUESTED = "InventoryReservationRequested";
+    public static final String INVENTORY_RELEASE_REQUESTED = "InventoryReleaseRequested";
+    public static final String INVENTORY_CONFIRMATION_REQUESTED = "InventoryConfirmationRequested";
     public static final String PAYMENT_REQUESTED = "PaymentRequested";
+    public static final String ORDER_CONFIRMED = "OrderConfirmed";
     public static final String ORDER_CANCELLED = "OrderCancelled";
     private static final Pattern SAFE_CORRELATION_ID = Pattern.compile("^[A-Za-z0-9._:-]{1,128}$");
 
@@ -66,7 +70,41 @@ public class OrderEventFactory {
         );
     }
 
+    public OutboxEvent inventoryConfirmationRequested(CustomerOrder order, String correlationId) {
+        requireStatus(order, OrderStatus.CONFIRMED);
+        return create(
+                order,
+                INVENTORY_CONFIRMATION_REQUESTED,
+                INVENTORY_COMMANDS_TOPIC,
+                correlationId,
+                new InventoryStatusCommandV1(order.getId())
+        );
+    }
+
+    public OutboxEvent inventoryReleaseRequested(CustomerOrder order, String correlationId) {
+        requireStatus(order, OrderStatus.CANCELLED);
+        return create(
+                order,
+                INVENTORY_RELEASE_REQUESTED,
+                INVENTORY_COMMANDS_TOPIC,
+                correlationId,
+                new InventoryStatusCommandV1(order.getId())
+        );
+    }
+
+    public OutboxEvent orderConfirmed(CustomerOrder order, String correlationId) {
+        requireStatus(order, OrderStatus.CONFIRMED);
+        return create(
+                order,
+                ORDER_CONFIRMED,
+                ORDER_EVENTS_TOPIC,
+                correlationId,
+                new OrderConfirmedV1(order.getId(), order.getCustomerId())
+        );
+    }
+
     public OutboxEvent orderCancelled(CustomerOrder order, String correlationId) {
+        requireStatus(order, OrderStatus.CANCELLED);
         OrderFailureReason failureReason = order.getFailureReason();
         if (failureReason == null) {
             throw new IllegalStateException("cancelled order must have a failure reason");
@@ -118,6 +156,13 @@ public class OrderEventFactory {
 
     private JsonNode serialize(EventEnvelope<?> envelope) {
         return objectMapper.valueToTree(envelope);
+    }
+
+    private void requireStatus(CustomerOrder order, OrderStatus expectedStatus) {
+        if (order.getStatus() != expectedStatus) {
+            throw new IllegalStateException(
+                    "order must be " + expectedStatus + " to create this event");
+        }
     }
 
     private String currentCorrelationId() {

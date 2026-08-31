@@ -24,6 +24,30 @@ sequenceDiagram
 
 The provider call is deliberately between the two database transactions. The second transaction makes the payment result, processed command, and next event indivisible inside `payment_db`.
 
+## Order Reaction and Compensation
+
+```mermaid
+sequenceDiagram
+    participant K as Kafka
+    participant O as Order Service
+    participant ODB as order_db
+    participant I as Inventory Service
+
+    K->>O: PaymentCompleted or PaymentFailed v1
+    O->>O: Validate key, envelope, payload, and state
+    alt payment completed
+        O->>ODB: CONFIRMED + inbox + confirmation/order outboxes
+        O-->>K: InventoryConfirmationRequested + OrderConfirmed
+        K->>I: Confirm held inventory
+    else payment declined
+        O->>ODB: CANCELLED + inbox + release/cancel outboxes
+        O-->>K: InventoryReleaseRequested + OrderCancelled
+        K->>I: Release held inventory
+    end
+```
+
+These are local atomic writes in `order_db`, followed by eventually consistent participant work. Release is a compensating action, not a rollback of the earlier Inventory transaction. Exact redelivery and semantic duplicates do not create additional commands; contradictory terminal outcomes are rejected to the DLT.
+
 ## Idempotent Replay
 
 If the existing payment is `COMPLETED`, `FAILED`, or `REFUNDED`, the application returns it without calling the processor. If it is `PENDING`, the processor may be called again with the same `paymentId`. The processor contract must return the same business outcome/reference for that key.

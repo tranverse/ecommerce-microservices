@@ -58,6 +58,7 @@ saga:
   messaging:
     listener-enabled: ${SAGA_MESSAGING_LISTENER_ENABLED:true}
     inventory-events-topic: ${INVENTORY_EVENTS_TOPIC:inventory.events.v1}
+    payment-events-topic: ${PAYMENT_EVENTS_TOPIC:payment.events.v1}
 
 outbox:
   publisher:
