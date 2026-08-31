@@ -48,6 +48,8 @@ sequenceDiagram
 
 These are local atomic writes in `order_db`, followed by eventually consistent participant work. Release is a compensating action, not a rollback of the earlier Inventory transaction. Exact redelivery and semantic duplicates do not create additional commands; contradictory terminal outcomes are rejected to the DLT.
 
+`OrderConfirmed` and `OrderCancelled` are also consumed by Notification Service in an independent group. Notification does not listen to `PaymentCompleted`: only Order can say that the whole workflow reached a customer-visible terminal state. See [Notification Delivery Flow](notification-flow.md).
+
 ## Idempotent Replay
 
 If the existing payment is `COMPLETED`, `FAILED`, or `REFUNDED`, the application returns it without calling the processor. If it is `PENDING`, the processor may be called again with the same `paymentId`. The processor contract must return the same business outcome/reference for that key.

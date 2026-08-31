@@ -8,7 +8,7 @@ The platform supports a customer journey from registration and login through pro
 
 ## Current state
 
-API Gateway, Auth, User, Product, Inventory, Order orchestration, and the Payment saga participant are implemented, containerized, tested, and documented. Gateway routes Order traffic and applies coarse roles; Order validates Auth JWTs again, scopes data to `sub`, obtains trusted Product snapshots through one bounded batch call, and commits the order plus its first saga command only to `order_db`. Inventory consumes reservation and status commands idempotently from `inventory_db`. Order records Inventory outcomes in its inbox: success atomically moves the order to `PAYMENT_PENDING` and creates `PaymentRequested`; reservation failure cancels it. Payment calls its idempotent provider port outside a database transaction, then atomically commits the terminal payment state, inbox, and `PaymentCompleted` or `PaymentFailed` outbox in `payment_db`. Order consumes that outcome: success confirms the order and requests inventory confirmation, while failure cancels the order and requests inventory release. Product and Inventory management APIs still need their own resource-server enforcement before direct exposure is safe. Registration-to-profile auto-provisioning and Notification are pending. A component is not considered implemented until its code, tests, runtime configuration, and documentation are present.
+API Gateway, Auth, User, Product, Inventory, Order orchestration, Payment, and Notification are implemented, containerized, tested, and documented. Gateway routes Order traffic and applies coarse roles; Order validates Auth JWTs again, scopes data to `sub`, obtains trusted Product snapshots through one bounded batch call, and commits the order plus its first saga command only to `order_db`. Inventory consumes reservation and status commands idempotently from `inventory_db`. Order records Inventory outcomes in its inbox: success atomically moves the order to `PAYMENT_PENDING` and creates `PaymentRequested`; reservation failure cancels it. Payment calls its idempotent provider port outside a database transaction, then atomically commits the terminal payment state, inbox, and `PaymentCompleted` or `PaymentFailed` outbox in `payment_db`. Order consumes that outcome: success confirms the order and requests inventory confirmation, while failure cancels the order and requests inventory release. Notification consumes the resulting `OrderConfirmed` or `OrderCancelled`, stores an idempotent delivery record in `notification_db`, and simulates delivery without blocking Order. Product and Inventory management APIs still need their own resource-server enforcement before direct exposure is safe. Registration-to-profile auto-provisioning remains pending. A component is not considered implemented until its code, tests, runtime configuration, and documentation are present.
 
 ## Target architecture
 
@@ -96,10 +96,11 @@ sequenceDiagram
     O->>K: InventoryConfirmationRequested or InventoryReleaseRequested (implemented)
     O->>K: OrderConfirmed or OrderCancelled (implemented)
     K->>I: Confirm or release reservation (implemented)
-    K->>N: Customer notification event
+    K->>N: OrderConfirmed or OrderCancelled (implemented)
+    N->>N: Inbox + delivery state + simulated provider (implemented)
 ```
 
-Synchronous acceptance through `202` and the asynchronous saga through a terminal Order state are implemented. A local `@Transactional` method cannot atomically update Order, Inventory, and Payment databases; each participant uses a local transaction plus outbox/inbox records. Payment failure is compensated by a new durable inventory-release command rather than a cross-database rollback.
+Synchronous acceptance through `202`, the asynchronous saga through a terminal Order state, and the decoupled Notification reaction are implemented. A local `@Transactional` method cannot atomically update Order, Inventory, Payment, and Notification databases; each participant uses local transactions plus outbox/inbox records. Payment failure is compensated by a new durable inventory-release command rather than a cross-database rollback.
 
 ## Deployment view
 

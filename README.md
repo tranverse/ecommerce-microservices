@@ -2,7 +2,7 @@
 
 A production-style Java 21 and Spring Boot 3 e-commerce system built incrementally as both a runnable distributed application and a practical microservices course.
 
-> **Implementation status:** API Gateway, Auth, User, Product, Inventory, Order, and Payment are implemented, containerized, and verified through terminal order outcomes. The Kafka saga now confirms orders and inventory after payment success, or releases inventory and cancels orders after payment failure. Automatic profile provisioning and Notification remain planned milestones.
+> **Implementation status:** API Gateway, Auth, User, Product, Inventory, Order, Payment, and Notification are implemented, containerized, and verified through terminal order outcomes and asynchronous notification delivery. The Kafka saga confirms orders and inventory after payment success, or releases inventory and cancels orders after payment failure. Notification consumes the terminal Order fact idempotently without blocking that workflow. Automatic profile provisioning remains a planned milestone.
 
 ## Project Overview
 
@@ -65,7 +65,7 @@ The complete design and current-state warning are maintained in [System Overview
 | Inventory Service | Stock, reservations, releases and concurrency | REST API and Kafka saga participant implemented |
 | Order Service | Authenticated orders, immutable item snapshots and saga orchestration | Acceptance, Inventory/Payment outcomes, confirmation, and compensation implemented |
 | Payment Service | Idempotent simulated charges, declines, outage recovery and refunds | Core workflow and Kafka saga participant implemented |
-| Notification Service | Asynchronous notification history and delivery simulation | Planned |
+| Notification Service | Asynchronous notification history and delivery simulation | Terminal Order consumer implemented |
 
 Detailed ownership and prohibited coupling are documented in [Service Boundaries](docs/architecture/service-boundaries.md).
 
@@ -76,11 +76,11 @@ Detailed ownership and prohibited coupling are documented in [Service Boundaries
 | Java 21 | LTS runtime, records, modern language/runtime features | Active |
 | Spring Boot 3.5 | Production application foundation and dependency management | Active |
 | Maven Wrapper | Reproducible builds without global Maven installation | Active |
-| PostgreSQL | Strong relational constraints and transactional service data | Active in Auth, User, Product, Inventory, Order, and Payment |
-| Flyway | Versioned, reviewable service-owned schema migrations | Active in Auth, User, Product, Inventory, Order, and Payment |
+| PostgreSQL | Strong relational constraints and transactional service data | Active in every persistent service, including Notification |
+| Flyway | Versioned, reviewable service-owned schema migrations | Active in every persistent service, including Notification |
 | Spring Security and JWT | Auth lifecycle, public JWKS, local token validation | Active in Auth, User, Order, and Gateway; other services pending |
 | Spring Cloud Gateway | Reactive edge routing without business logic | Active |
-| Kafka | Durable asynchronous saga communication and notifications | Active through terminal Order confirmation/compensation; Notification pending |
+| Kafka | Durable asynchronous saga communication and notifications | Active through terminal Order outcomes and Notification delivery |
 | Testcontainers | Integration tests against real PostgreSQL/Kafka behavior | Active for PostgreSQL and Kafka |
 | Resilience4j | Bounded failure handling for justified synchronous calls | Planned |
 | Micrometer/OpenTelemetry | Metrics and distributed traces | Planned |
@@ -101,7 +101,8 @@ Current:
 │   ├── product-service/        # Catalog API, product_db, tests, and image
 │   ├── inventory-service/      # Stock reservations, inventory_db, concurrency tests
 │   ├── order-service/          # Authenticated acceptance, snapshots, order_db, state machine
-│   └── payment-service/        # Idempotent charge/refund workflow and payment_db
+│   ├── payment-service/        # Idempotent charge/refund workflow and payment_db
+│   └── notification-service/   # Terminal Order consumer, delivery history, notification_db
 ├── docs/
 │   ├── architecture/
 │   ├── decisions/
@@ -180,10 +181,9 @@ PaymentRequested
 PaymentCompleted | PaymentFailed
 InventoryReleaseRequested
 OrderConfirmed | OrderCancelled
-NotificationRequested
 ```
 
-Messages include event identity, version, timestamp, aggregate ID, and correlation ID. The implemented Order and Inventory producers persist messages in a transactional outbox. Both consumers assume at-least-once delivery, validate the v1 contract, record processed event IDs in a local inbox, and send poison messages to a DLT. Technical failures receive bounded retry; invalid or state-conflicting messages do not.
+Messages include event identity, version, timestamp, aggregate ID, and correlation ID. Order, Inventory, and Payment producers persist messages in transactional outboxes. Consumers assume at-least-once delivery, validate the v1 contract, record processed event IDs in a local inbox, and send poison messages to a DLT. Technical failures receive bounded retry; invalid or state-conflicting messages do not. Notification reacts directly to terminal Order facts, so an extra `NotificationRequested` command is unnecessary.
 
 ## Order Workflow
 
@@ -191,13 +191,17 @@ The order endpoint validates products synchronously through one bounded batch ca
 
 ## Saga
 
-Order Service orchestrates the saga because it owns the customer-visible lifecycle and state machine. The Inventory round trip, Payment participant, terminal confirmation, and payment-failure compensation are implemented. Payment success atomically creates `InventoryConfirmationRequested` and `OrderConfirmed`; payment failure atomically creates `InventoryReleaseRequested` and `OrderCancelled`. Notification will react only after one of those durable business outcomes.
+Order Service orchestrates the saga because it owns the customer-visible lifecycle and state machine. The Inventory round trip, Payment participant, terminal confirmation, and payment-failure compensation are implemented. Payment success atomically creates `InventoryConfirmationRequested` and `OrderConfirmed`; payment failure atomically creates `InventoryReleaseRequested` and `OrderCancelled`. Notification now reacts only after one of those durable business outcomes.
 
 The decision and trade-offs are in [ADR 003](docs/decisions/003-orchestrated-order-saga.md) and [Saga Compensation and Eventual Consistency](docs/learning/12-saga-compensation-and-eventual-consistency.md).
 
 ## Payment Workflow
 
 Payment Service persists one payment per opaque Order ID and implements `PENDING -> COMPLETED`, `PENDING -> FAILED`, and `COMPLETED -> REFUNDED` rules. It now consumes strict `PaymentRequested` v1 commands and publishes terminal outcomes through its transactional outbox. Provider calls run outside database transactions and use the durable Payment ID as an idempotency key, making ambiguous retries safe. Business declines are terminal; technical outages preserve a retryable state and leave the Kafka input unprocessed. See [Payment Service](services/payment-service/README.md) and [Payment Processing Flow](docs/flows/payment-processing-flow.md).
+
+## Notification Workflow
+
+Notification Service consumes strict `OrderConfirmed` and `OrderCancelled` v1 events in its own consumer group. It atomically stores a `PENDING` notification with its inbox record, invokes the simulated provider outside the database transaction, then records `SENT` or `FAILED`. Exact and semantic duplicates do not create repeat delivery. See [Notification Service](services/notification-service/README.md), [Notification Delivery Flow](docs/flows/notification-flow.md), and [Asynchronous Notifications](docs/learning/13-asynchronous-notifications-and-delivery-semantics.md).
 
 ## Reliability
 
@@ -399,6 +403,28 @@ Payment readiness is `http://localhost:8086/actuator/health/readiness`. There is
 docker build -f services/payment-service/Dockerfile -t ecommerce/payment-service:local .
 ```
 
+### Notification Service
+
+Start its separate PostgreSQL database and Kafka, then run Notification:
+
+```powershell
+$env:NOTIFICATION_DB_PASSWORD = "<choose-a-local-password>"
+$env:NOTIFICATION_DB_URL = "jdbc:postgresql://localhost:5438/notification_db"
+docker run --name ecommerce-notification-db --rm -d `
+  -e POSTGRES_DB=notification_db `
+  -e POSTGRES_USER=notification_app `
+  -e POSTGRES_PASSWORD=$env:NOTIFICATION_DB_PASSWORD `
+  -p 5438:5432 postgres:17.6-alpine
+
+.\mvnw.cmd -pl services/notification-service spring-boot:run
+```
+
+Notification readiness is `http://localhost:8087/actuator/health/readiness`. There is intentionally no public business API.
+
+```powershell
+docker build -f services/notification-service/Dockerfile -t ecommerce/notification-service:local .
+```
+
 The final target command will be:
 
 ```text
@@ -498,7 +524,19 @@ Payment Service supports:
 | `PAYMENT_SIMULATOR_DECLINE_PAYMENTS` | Return deterministic business declines | `false` |
 | `PAYMENT_SIMULATOR_UNAVAILABLE` | Simulate processor unavailability | `false` |
 
-Kafka and observability variables will be added to `.env.example` with their implementations. A real `.env` file is ignored and never committed.
+Notification Service supports:
+
+| Variable | Purpose | Default |
+| --- | --- | --- |
+| `SERVER_PORT` | Notification actuator port | `8087` |
+| `NOTIFICATION_DB_URL` | Notification PostgreSQL JDBC URL | `jdbc:postgresql://localhost:5432/notification_db` |
+| `NOTIFICATION_DB_USERNAME` | Notification database user | `notification_app` |
+| `NOTIFICATION_DB_PASSWORD` | Notification database password | Required; no default |
+| `NOTIFICATION_KAFKA_CONSUMER_GROUP` | Independent Kafka consumer group | `notification-service-v1` |
+| `ORDER_EVENTS_TOPIC` | Terminal Order event topic | `order.events.v1` |
+| `NOTIFICATION_SIMULATOR_FAIL_DELIVERIES` | Persist simulated provider failures | `false` |
+
+Messaging services share `KAFKA_BOOTSTRAP_SERVERS`, defaulting to `localhost:9092`. A real `.env` file is ignored and never committed.
 
 ## API Examples
 
@@ -576,7 +614,7 @@ Run every implemented service suite:
 .\mvnw.cmd test
 ```
 
-Product has 20 tests, Inventory has 28 including concurrent reservation and real Kafka/PostgreSQL flows, Auth has 15 covering cryptography/token lifecycle, User has 17 covering resource-server security and ownership, Gateway has 9 covering routing and edge behavior, Order has 49 covering acceptance, outbox/inbox, strict Inventory/Payment event parsing, terminal state transitions, compensation, and real Kafka/PostgreSQL flows, and Payment has 33 covering state transitions, database constraints, provider retry/refund semantics, strict event contracts, outbox/inbox behavior, and real Kafka/PostgreSQL flows. The implemented reactor currently has 171 tests. Each service uses the smallest meaningful combination of unit, controller, repository, integration, security, proxy, and Testcontainers tests.
+Product has 20 tests, Inventory has 28 including concurrent reservation and real Kafka/PostgreSQL flows, Auth has 15 covering cryptography/token lifecycle, User has 17 covering resource-server security and ownership, Gateway has 9 covering routing and edge behavior, Order has 49 covering acceptance, outbox/inbox, strict Inventory/Payment event parsing, terminal state transitions, compensation, and real Kafka/PostgreSQL flows, Payment has 33 covering state transitions, database constraints, provider retry/refund semantics, strict event contracts, outbox/inbox behavior, and real Kafka/PostgreSQL flows, and Notification has 17 covering delivery state, strict terminal event parsing, duplicates, provider failure, contradictory/corrupted outcomes, and a real Kafka/PostgreSQL flow. The implemented reactor currently has 188 tests. Each service uses the smallest meaningful combination of unit, controller, repository, integration, security, proxy, and Testcontainers tests.
 
 ## Documentation
 
@@ -592,6 +630,7 @@ Product has 20 tests, Inventory has 28 including concurrent reservation and real
 - [Inventory reservation flow](docs/flows/inventory-flow.md)
 - [Order creation flow](docs/flows/order-creation-flow.md)
 - [Payment processing flow](docs/flows/payment-processing-flow.md)
+- [Notification delivery flow](docs/flows/notification-flow.md)
 - [Architecture decisions](docs/decisions/)
 - [Learning notes](docs/learning/)
 
@@ -613,8 +652,9 @@ Start with:
 10. [Payment Side Effects and Idempotency](docs/learning/10-payment-side-effects-and-idempotency.md)
 11. [Transactional Outbox and Idempotent Consumers](docs/learning/11-transactional-outbox-and-idempotent-consumers.md)
 12. [Saga Compensation and Eventual Consistency](docs/learning/12-saga-compensation-and-eventual-consistency.md)
-13. Read the ADRs and compare their alternatives.
-14. Follow the Gateway, Auth, User, Product, Inventory, Order, and Payment READMEs from adapters to application services, domains, repositories, migrations, and tests.
+13. [Asynchronous Notifications and Delivery Semantics](docs/learning/13-asynchronous-notifications-and-delivery-semantics.md)
+14. Read the ADRs and compare their alternatives.
+15. Follow the Gateway, Auth, User, Product, Inventory, Order, Payment, and Notification READMEs from adapters to application services, domains, repositories, migrations, and tests.
 
 Later notes will reference the exact service, class, endpoint, migration, event, and configuration that implements each concept.
 

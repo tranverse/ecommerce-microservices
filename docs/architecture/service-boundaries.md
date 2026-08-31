@@ -37,6 +37,8 @@ Payment's local charge/refund workflow and Kafka saga participant are implemente
 
 Notification delivery is slow and failure-prone relative to order processing. It consumes events asynchronously so email simulation or a future provider outage cannot roll back a confirmed order.
 
+The implemented consumer listens to terminal Order events rather than Payment outcomes because Payment does not own the final order decision. Notification stores history, attempts, failure state, and its inbox in `notification_db`. The initial `SYSTEM` channel uses an opaque customer ID; Notification neither queries `user_db` nor imports another service's entities. A future email channel requires an explicit recipient-data contract or projection.
+
 ## Dependency rules
 
 - External traffic enters through Gateway.

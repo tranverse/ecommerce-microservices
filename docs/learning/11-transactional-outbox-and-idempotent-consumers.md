@@ -51,6 +51,8 @@ Order applies the same rule when consuming Inventory outcomes. It locks the orde
 
 The same pattern completes the Payment leg. Order locks a `PAYMENT_PENDING` order and commits either `CONFIRMED` plus two success outboxes, or `CANCELLED` plus two compensation/outcome outboxes. Because the state, inbox, and both outbox rows share one transaction, a crash cannot publish only half of the orchestrator's decision.
 
+Notification applies the inbox rule before its external side effect: accepting a terminal Order event commits one `PENDING` notification plus the processed event. Exact and semantic duplicates resolve to the same row. The inbox cannot make an external provider exactly once, so delivery additionally uses the durable notification ID as a provider idempotency key.
+
 ## Transaction Boundaries
 
 Successful reservation uses one local transaction:

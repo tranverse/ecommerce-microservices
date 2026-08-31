@@ -1,6 +1,6 @@
 # ADR 003: Use an Orchestrated Saga for Order Processing
 
-Status: **Accepted; implemented through terminal confirmation and payment-failure compensation**
+Status: **Accepted; implemented through terminal confirmation, payment-failure compensation, and the decoupled Notification reaction**
 
 ## Context
 
@@ -36,4 +36,5 @@ Order already owns the customer-visible lifecycle. Centralizing transition decis
 - Order state transitions must reject stale or invalid events.
 - Payment failure after reservation triggers inventory release and cancellation.
 - Transactional outbox and processed-event records are required where state and messaging consistency matter.
+- Notification reacts to terminal Order facts in its own consumer group and is not a saga decision-maker.
 - A sequence diagram and failure matrix will be maintained with the implementation.

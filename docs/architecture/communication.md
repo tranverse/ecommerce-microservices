@@ -1,6 +1,6 @@
 # Service Communication
 
-Status: **Accepted; synchronous Product lookup and the Kafka saga through terminal Order confirmation/compensation are implemented.**
+Status: **Accepted; synchronous Product lookup, the terminal Order saga, and asynchronous Notification delivery are implemented.**
 
 ## Decision policy
 
@@ -18,6 +18,8 @@ Payment exposes no public business route. Its Kafka consumer invokes the applica
 
 Order consumes Payment outcomes with the same at-least-once rules used for Inventory outcomes. A success changes the order and writes inventory-confirmation plus order-confirmed outbox rows in one `order_db` transaction. A decline writes the cancellation, inventory-release command, order-cancelled event, and inbox row together. No service writes another service's database.
 
+Notification consumes only `OrderConfirmed` and `OrderCancelled` because Order owns the final customer-visible outcome. Its inbox and `PENDING` notification share one `notification_db` transaction. The provider call runs outside that transaction; success or failure is finalized in a later short transaction. A stable notification ID is the external idempotency key for ambiguous retries.
+
 ## Synchronous standards
 
 - Use Spring `RestClient` for imperative MVC services; it matches the blocking stack and avoids adding reactive complexity.
@@ -33,7 +35,7 @@ Order consumes Payment outcomes with the same at-least-once rules used for Inven
 - Commands name an intended action; events state a fact that already occurred.
 - Aggregate ID is the Kafka message key when per-aggregate ordering matters.
 - Producers use a transactional outbox when database state and publication must not diverge.
-- Consumers assume at-least-once delivery and enforce idempotency before external side effects.
+- Consumers assume at-least-once delivery and enforce idempotency before external side effects. Provider adapters also need a stable idempotency key because an inbox cannot atomically commit with an external provider.
 - Dead-letter handling is operational visibility, not a substitute for correct error handling.
 
 ## Failure model
