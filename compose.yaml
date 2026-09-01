@@ -1,0 +1,335 @@
+name: ecommerce-microservices
+
+x-application-defaults: &application-defaults
+  restart: unless-stopped
+  init: true
+  networks:
+    - ecommerce
+  stop_grace_period: 30s
+
+x-database-environment: &database-environment
+  AUTH_DB_USERNAME: ${AUTH_DB_USERNAME:-auth_app}
+  AUTH_DB_PASSWORD: ${AUTH_DB_PASSWORD:?Set AUTH_DB_PASSWORD in .env}
+  USER_DB_USERNAME: ${USER_DB_USERNAME:-user_app}
+  USER_DB_PASSWORD: ${USER_DB_PASSWORD:?Set USER_DB_PASSWORD in .env}
+  PRODUCT_DB_USERNAME: ${PRODUCT_DB_USERNAME:-product_app}
+  PRODUCT_DB_PASSWORD: ${PRODUCT_DB_PASSWORD:?Set PRODUCT_DB_PASSWORD in .env}
+  INVENTORY_DB_USERNAME: ${INVENTORY_DB_USERNAME:-inventory_app}
+  INVENTORY_DB_PASSWORD: ${INVENTORY_DB_PASSWORD:?Set INVENTORY_DB_PASSWORD in .env}
+  ORDER_DB_USERNAME: ${ORDER_DB_USERNAME:-order_app}
+  ORDER_DB_PASSWORD: ${ORDER_DB_PASSWORD:?Set ORDER_DB_PASSWORD in .env}
+  PAYMENT_DB_USERNAME: ${PAYMENT_DB_USERNAME:-payment_app}
+  PAYMENT_DB_PASSWORD: ${PAYMENT_DB_PASSWORD:?Set PAYMENT_DB_PASSWORD in .env}
+  NOTIFICATION_DB_USERNAME: ${NOTIFICATION_DB_USERNAME:-notification_app}
+  NOTIFICATION_DB_PASSWORD: ${NOTIFICATION_DB_PASSWORD:?Set NOTIFICATION_DB_PASSWORD in .env}
+
+services:
+  postgres:
+    image: postgres:17.6-alpine
+    restart: unless-stopped
+    environment:
+      <<: *database-environment
+      POSTGRES_DB: postgres
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_SUPERUSER_PASSWORD:?Set POSTGRES_SUPERUSER_PASSWORD in .env}
+    ports:
+      - "127.0.0.1:${POSTGRES_HOST_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./infrastructure/postgres/init-databases.sh:/docker-entrypoint-initdb.d/10-init-databases.sh:ro
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          pg_isready -U postgres -d postgres &&
+          test "$$(psql -U postgres -d postgres -tAc
+          "SELECT count(*) FROM pg_database WHERE datname IN
+          ('auth_db','user_db','product_db','inventory_db','order_db','payment_db','notification_db')")"
+          -eq 7
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    networks:
+      - ecommerce
+
+  kafka-storage-init:
+    image: apache/kafka:3.8.0
+    user: "0:0"
+    network_mode: none
+    entrypoint:
+      - /bin/bash
+      - -ec
+    command:
+      - install -d -o 1000 -g 1000 /var/lib/kafka/data
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    restart: "no"
+
+  kafka:
+    image: apache/kafka:3.8.0
+    restart: unless-stopped
+    depends_on:
+      kafka-storage-init:
+        condition: service_completed_successfully
+    environment:
+      CLUSTER_ID: ${KAFKA_CLUSTER_ID:-MkU3OEVBNTcwNTJENDM2Qk}
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: CONTROLLER://:9093,INTERNAL://:19092,HOST://:9092
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:19092,HOST://localhost:${KAFKA_HOST_PORT:-9092}
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT,HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_NUM_PARTITIONS: 3
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+    ports:
+      - "127.0.0.1:${KAFKA_HOST_PORT:-9092}:9092"
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test:
+        - CMD
+        - /opt/kafka/bin/kafka-topics.sh
+        - --bootstrap-server
+        - localhost:19092
+        - --list
+      interval: 5s
+      timeout: 10s
+      retries: 20
+      start_period: 15s
+    networks:
+      - ecommerce
+
+  kafka-init:
+    image: apache/kafka:3.8.0
+    depends_on:
+      kafka:
+        condition: service_healthy
+    command:
+      - /bin/bash
+      - -ec
+      - |
+        for topic in \
+          inventory.commands.v1 inventory.commands.v1.DLT \
+          inventory.events.v1 inventory.events.v1.DLT \
+          payment.commands.v1 payment.commands.v1.DLT \
+          payment.events.v1 payment.events.v1.DLT \
+          order.events.v1 order.events.v1.DLT
+        do
+          /opt/kafka/bin/kafka-topics.sh \
+            --bootstrap-server kafka:19092 \
+            --create --if-not-exists \
+            --topic "$${topic}" \
+            --partitions 3 \
+            --replication-factor 1
+        done
+    restart: "no"
+    networks:
+      - ecommerce
+
+  auth-service:
+    <<: *application-defaults
+    image: ecommerce/auth-service:local
+    build:
+      context: .
+      dockerfile: services/auth-service/Dockerfile
+    environment:
+      SERVER_PORT: 8081
+      AUTH_DB_URL: jdbc:postgresql://postgres:5432/auth_db
+      AUTH_DB_USERNAME: ${AUTH_DB_USERNAME:-auth_app}
+      AUTH_DB_PASSWORD: ${AUTH_DB_PASSWORD:?Set AUTH_DB_PASSWORD in .env}
+      AUTH_DB_POOL_SIZE: ${AUTH_DB_POOL_SIZE:-5}
+      AUTH_DB_MIN_IDLE: ${AUTH_DB_MIN_IDLE:-1}
+      AUTH_JWT_ISSUER: ${AUTH_JWT_ISSUER:-http://localhost:8081}
+      AUTH_JWT_PRIVATE_KEY_BASE64: ${AUTH_JWT_PRIVATE_KEY_BASE64:-}
+      AUTH_JWT_PUBLIC_KEY_BASE64: ${AUTH_JWT_PUBLIC_KEY_BASE64:-}
+      AUTH_JWT_REQUIRE_CONFIGURED_KEY: "false"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${AUTH_HOST_PORT:-8081}:8081"
+
+  user-service:
+    <<: *application-defaults
+    image: ecommerce/user-service:local
+    build:
+      context: .
+      dockerfile: services/user-service/Dockerfile
+    environment:
+      SERVER_PORT: 8082
+      USER_DB_URL: jdbc:postgresql://postgres:5432/user_db
+      USER_DB_USERNAME: ${USER_DB_USERNAME:-user_app}
+      USER_DB_PASSWORD: ${USER_DB_PASSWORD:?Set USER_DB_PASSWORD in .env}
+      USER_DB_POOL_SIZE: ${USER_DB_POOL_SIZE:-5}
+      USER_DB_MIN_IDLE: ${USER_DB_MIN_IDLE:-1}
+      USER_AUTH_ISSUER: ${AUTH_JWT_ISSUER:-http://localhost:8081}
+      USER_AUTH_JWKS_URI: http://auth-service:8081/.well-known/jwks.json
+    depends_on:
+      postgres:
+        condition: service_healthy
+      auth-service:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${USER_HOST_PORT:-8082}:8082"
+
+  product-service:
+    <<: *application-defaults
+    image: ecommerce/product-service:local
+    build:
+      context: .
+      dockerfile: services/product-service/Dockerfile
+    environment:
+      SERVER_PORT: 8083
+      PRODUCT_DB_URL: jdbc:postgresql://postgres:5432/product_db
+      PRODUCT_DB_USERNAME: ${PRODUCT_DB_USERNAME:-product_app}
+      PRODUCT_DB_PASSWORD: ${PRODUCT_DB_PASSWORD:?Set PRODUCT_DB_PASSWORD in .env}
+      PRODUCT_DB_POOL_SIZE: ${PRODUCT_DB_POOL_SIZE:-5}
+      PRODUCT_DB_MIN_IDLE: ${PRODUCT_DB_MIN_IDLE:-1}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${PRODUCT_HOST_PORT:-8083}:8083"
+
+  inventory-service:
+    <<: *application-defaults
+    image: ecommerce/inventory-service:local
+    build:
+      context: .
+      dockerfile: services/inventory-service/Dockerfile
+    environment:
+      SERVER_PORT: 8084
+      INVENTORY_DB_URL: jdbc:postgresql://postgres:5432/inventory_db
+      INVENTORY_DB_USERNAME: ${INVENTORY_DB_USERNAME:-inventory_app}
+      INVENTORY_DB_PASSWORD: ${INVENTORY_DB_PASSWORD:?Set INVENTORY_DB_PASSWORD in .env}
+      INVENTORY_DB_POOL_SIZE: ${INVENTORY_DB_POOL_SIZE:-5}
+      INVENTORY_DB_MIN_IDLE: ${INVENTORY_DB_MIN_IDLE:-1}
+      KAFKA_BOOTSTRAP_SERVERS: kafka:19092
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+    ports:
+      - "127.0.0.1:${INVENTORY_HOST_PORT:-8084}:8084"
+
+  order-service:
+    <<: *application-defaults
+    image: ecommerce/order-service:local
+    build:
+      context: .
+      dockerfile: services/order-service/Dockerfile
+    environment:
+      SERVER_PORT: 8085
+      ORDER_DB_URL: jdbc:postgresql://postgres:5432/order_db
+      ORDER_DB_USERNAME: ${ORDER_DB_USERNAME:-order_app}
+      ORDER_DB_PASSWORD: ${ORDER_DB_PASSWORD:?Set ORDER_DB_PASSWORD in .env}
+      ORDER_DB_POOL_SIZE: ${ORDER_DB_POOL_SIZE:-5}
+      ORDER_DB_MIN_IDLE: ${ORDER_DB_MIN_IDLE:-1}
+      ORDER_AUTH_ISSUER: ${AUTH_JWT_ISSUER:-http://localhost:8081}
+      ORDER_AUTH_JWKS_URI: http://auth-service:8081/.well-known/jwks.json
+      ORDER_PRODUCT_SERVICE_URL: http://product-service:8083
+      KAFKA_BOOTSTRAP_SERVERS: kafka:19092
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+      auth-service:
+        condition: service_healthy
+      product-service:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${ORDER_HOST_PORT:-8085}:8085"
+
+  payment-service:
+    <<: *application-defaults
+    image: ecommerce/payment-service:local
+    build:
+      context: .
+      dockerfile: services/payment-service/Dockerfile
+    environment:
+      SERVER_PORT: 8086
+      PAYMENT_DB_URL: jdbc:postgresql://postgres:5432/payment_db
+      PAYMENT_DB_USERNAME: ${PAYMENT_DB_USERNAME:-payment_app}
+      PAYMENT_DB_PASSWORD: ${PAYMENT_DB_PASSWORD:?Set PAYMENT_DB_PASSWORD in .env}
+      PAYMENT_DB_POOL_SIZE: ${PAYMENT_DB_POOL_SIZE:-5}
+      PAYMENT_DB_MIN_IDLE: ${PAYMENT_DB_MIN_IDLE:-1}
+      PAYMENT_SIMULATOR_DECLINE_PAYMENTS: ${PAYMENT_SIMULATOR_DECLINE_PAYMENTS:-false}
+      PAYMENT_SIMULATOR_UNAVAILABLE: ${PAYMENT_SIMULATOR_UNAVAILABLE:-false}
+      KAFKA_BOOTSTRAP_SERVERS: kafka:19092
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+    ports:
+      - "127.0.0.1:${PAYMENT_HOST_PORT:-8086}:8086"
+
+  notification-service:
+    <<: *application-defaults
+    image: ecommerce/notification-service:local
+    build:
+      context: .
+      dockerfile: services/notification-service/Dockerfile
+    environment:
+      SERVER_PORT: 8087
+      NOTIFICATION_DB_URL: jdbc:postgresql://postgres:5432/notification_db
+      NOTIFICATION_DB_USERNAME: ${NOTIFICATION_DB_USERNAME:-notification_app}
+      NOTIFICATION_DB_PASSWORD: ${NOTIFICATION_DB_PASSWORD:?Set NOTIFICATION_DB_PASSWORD in .env}
+      NOTIFICATION_DB_POOL_SIZE: ${NOTIFICATION_DB_POOL_SIZE:-5}
+      NOTIFICATION_DB_MIN_IDLE: ${NOTIFICATION_DB_MIN_IDLE:-1}
+      NOTIFICATION_SIMULATOR_FAIL_DELIVERIES: ${NOTIFICATION_SIMULATOR_FAIL_DELIVERIES:-false}
+      KAFKA_BOOTSTRAP_SERVERS: kafka:19092
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+    ports:
+      - "127.0.0.1:${NOTIFICATION_HOST_PORT:-8087}:8087"
+
+  api-gateway:
+    <<: *application-defaults
+    image: ecommerce/api-gateway:local
+    build:
+      context: .
+      dockerfile: services/api-gateway/Dockerfile
+    environment:
+      SERVER_PORT: 8080
+      GATEWAY_AUTH_ISSUER: ${AUTH_JWT_ISSUER:-http://localhost:8081}
+      GATEWAY_AUTH_JWKS_URI: http://auth-service:8081/.well-known/jwks.json
+      AUTH_SERVICE_URL: http://auth-service:8081
+      USER_SERVICE_URL: http://user-service:8082
+      PRODUCT_SERVICE_URL: http://product-service:8083
+      INVENTORY_SERVICE_URL: http://inventory-service:8084
+      ORDER_SERVICE_URL: http://order-service:8085
+    depends_on:
+      auth-service:
+        condition: service_healthy
+      user-service:
+        condition: service_healthy
+      product-service:
+        condition: service_healthy
+      inventory-service:
+        condition: service_healthy
+      order-service:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${GATEWAY_HOST_PORT:-8080}:8080"
+
+networks:
+  ecommerce:
+    name: ecommerce-network
+
+volumes:
+  postgres-data:
+  kafka-data:

@@ -30,7 +30,7 @@ Each persistent service will contain:
 - Database constraints and indexes aligned with real queries
 - Repository integration tests using PostgreSQL Testcontainers
 
-Local Compose will run separate databases and users on one PostgreSQL container. This saves resources while preventing accidental cross-database joins through application credentials.
+Local Compose runs separate databases and users on one PostgreSQL container. This saves resources while preventing accidental cross-database joins through application credentials.
 
 ## Request Flow
 

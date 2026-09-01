@@ -1,6 +1,6 @@
 # Database Architecture
 
-Status: **Accepted; `auth_db`, `user_db`, `product_db`, `inventory_db`, `order_db`, and `payment_db` are implemented. Remaining databases arrive with their owners.**
+Status: **Accepted and implemented for all seven persistent services.**
 
 ## Database-per-service
 
@@ -29,7 +29,7 @@ The API Gateway is stateless and has no business database.
 
 ## Local development
 
-One PostgreSQL container may host the logical databases to reduce local resource usage. Separate databases and users still prevent accidental joins and direct access. This is operational co-location, not shared ownership.
+One PostgreSQL container hosts the logical databases in `compose.yaml` to reduce local resource usage. Separate databases and users still prevent accidental joins and direct access. `infrastructure/postgres/init-databases.sh` revokes public connection access and grants each login access to its owned database. This is operational co-location, not shared ownership.
 
 ```mermaid
 flowchart TB
@@ -43,7 +43,7 @@ flowchart TB
     PG --> NotificationDB[notification_db / notification_app]
 ```
 
-Local credentials will be safe documented defaults supplied through environment variables. Real credentials and `.env` files must never be committed.
+Local placeholder credentials are copied from `.env.example` into the ignored `.env` file and supplied through environment variables. Real credentials and `.env` files must never be committed.
 
 ## Production evolution
 

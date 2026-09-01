@@ -69,9 +69,8 @@ management:
   endpoint:
     health:
       show-details: never
-  health:
-    probes:
-      enabled: true
+      probes:
+        enabled: true
 
 springdoc:
   swagger-ui:

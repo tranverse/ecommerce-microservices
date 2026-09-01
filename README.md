@@ -2,7 +2,7 @@
 
 A production-style Java 21 and Spring Boot 3 e-commerce system built incrementally as both a runnable distributed application and a practical microservices course.
 
-> **Implementation status:** API Gateway, Auth, User, Product, Inventory, Order, Payment, and Notification are implemented, containerized, and verified through terminal order outcomes and asynchronous notification delivery. The Kafka saga confirms orders and inventory after payment success, or releases inventory and cancels orders after payment failure. Notification consumes the terminal Order fact idempotently without blocking that workflow. Automatic profile provisioning remains a planned milestone.
+> **Implementation status:** API Gateway, Auth, User, Product, Inventory, Order, Payment, and Notification are implemented, containerized, and wired into one Docker Compose environment. The Kafka saga confirms orders and inventory after payment success, or releases inventory and cancels orders after payment failure. Notification consumes the terminal Order fact idempotently without blocking that workflow. Automatic profile provisioning remains a planned milestone.
 
 ## Project Overview
 
@@ -130,14 +130,13 @@ Accepted target:
 │   └── notification-service/
 ├── contracts/                  # Versioned HTTP/event schemas, not shared entities
 ├── infrastructure/
-│   ├── database/
-│   ├── kafka/
-│   └── monitoring/
+│   └── postgres/               # Local role/database bootstrap only
 ├── docs/
 │   ├── architecture/
 │   ├── decisions/
 │   ├── flows/
 │   └── learning/
+├── scripts/                    # Repeatable local verification tools
 ├── pom.xml                     # Build aggregation only
 ├── compose.yaml
 └── .env.example
@@ -425,13 +424,31 @@ Notification readiness is `http://localhost:8087/actuator/health/readiness`. The
 docker build -f services/notification-service/Dockerfile -t ecommerce/notification-service:local .
 ```
 
-The final target command will be:
+## Full local stack with Docker Compose
 
-```text
-docker compose up --build
+Compose starts eight applications, one Kafka KRaft broker, and one PostgreSQL server containing seven service-owned databases/users. Co-location saves local memory; it does not permit shared tables or credentials.
+
+```powershell
+Copy-Item .env.example .env
+docker compose up --build -d
+docker compose ps
+./scripts/verify-compose.ps1
 ```
 
-It is not documented as working until end-to-end validation passes.
+Use the Gateway at `http://localhost:8080`. Ports `8081` through `8087`, PostgreSQL `5432`, and Kafka `9092` are bound to `127.0.0.1` for local inspection only. Containers call each other through Compose DNS such as `auth-service:8081`, `product-service:8083`, `postgres:5432`, and `kafka:19092`; `localhost` inside a container refers only to that container.
+
+Kafka automatic topic creation is disabled. The one-shot `kafka-init` service creates the five versioned workflow topics and their DLTs before consumers start. Application readiness checks gate dependent startup, but they do not replace runtime timeout/retry/circuit-breaker behavior.
+
+Inspect or stop the environment with:
+
+```powershell
+docker compose logs -f order-service inventory-service payment-service notification-service
+docker compose down
+```
+
+The smoke script seeds a unique product and stock item, registers a customer through Gateway, submits an order, and verifies `Order=CONFIRMED`, `Inventory=CONFIRMED`, `Payment=COMPLETED`, and `Notification=SENT`. Its direct Product/Inventory setup calls and database assertions are local test-harness behavior, not production access patterns.
+
+Named PostgreSQL and Kafka volumes survive `down`. `docker compose down -v` is an intentional destructive reset. See [Docker Compose and Networking](docs/learning/14-docker-compose-and-networking.md) and [ADR 010](docs/decisions/010-local-compose-topology.md).
 
 ## Configuration
 
@@ -653,8 +670,9 @@ Start with:
 11. [Transactional Outbox and Idempotent Consumers](docs/learning/11-transactional-outbox-and-idempotent-consumers.md)
 12. [Saga Compensation and Eventual Consistency](docs/learning/12-saga-compensation-and-eventual-consistency.md)
 13. [Asynchronous Notifications and Delivery Semantics](docs/learning/13-asynchronous-notifications-and-delivery-semantics.md)
-14. Read the ADRs and compare their alternatives.
-15. Follow the Gateway, Auth, User, Product, Inventory, Order, Payment, and Notification READMEs from adapters to application services, domains, repositories, migrations, and tests.
+14. [Docker Compose and Service Networking](docs/learning/14-docker-compose-and-networking.md)
+15. Read the ADRs and compare their alternatives.
+16. Follow the Gateway, Auth, User, Product, Inventory, Order, Payment, and Notification READMEs from adapters to application services, domains, repositories, migrations, and tests.
 
 Later notes will reference the exact service, class, endpoint, migration, event, and configuration that implements each concept.
 
