@@ -68,7 +68,7 @@ Automatic topic creation is disabled. The one-shot `kafka-init` container create
 
 Compose waits for PostgreSQL and Kafka health, then waits for topic creation before starting Kafka participants. Application Dockerfiles probe `/actuator/health/readiness`.
 
-This only improves startup. If Product becomes unavailable after Order starts, Compose does not make the HTTP call reliable. Timeouts, retry policy, circuit breakers, idempotency, and observable failure states are runtime concerns covered by the next resilience milestone.
+This only improves startup. If Product becomes unavailable after Order starts, Compose does not make the HTTP call reliable. Order's runtime timeout, retry, and circuit-breaker policy is covered in [Timeouts, Retries, and Circuit Breakers](15-timeouts-retries-and-circuit-breakers.md).
 
 Readiness and liveness answer different questions:
 
@@ -92,9 +92,9 @@ docker compose down
 
 1. Start the stack and verify Gateway readiness.
 2. Stop Product Service with `docker compose stop product-service`.
-3. Attempt order creation and observe that Order cannot obtain an authoritative price snapshot.
-4. Start Product again and observe recovery.
-5. Explain why `depends_on` did not help after startup and which resilience rule should apply.
+3. Attempt several order creations and observe bounded failures followed by circuit-breaker fail-fast behavior.
+4. Start Product again, wait for the open interval, and observe half-open recovery probes.
+5. Explain why `depends_on` did not help after startup and why Order still refuses to invent a fallback price.
 
 ## Common mistakes
 

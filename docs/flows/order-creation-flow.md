@@ -26,11 +26,19 @@ sequenceDiagram
         D-->>O: Existing order with different hash
         O-->>G: 409 idempotency conflict
     else new request
-        O->>P: GET product batch (bounded timeout)
-        P-->>O: Trusted active product data
-        O->>D: Local transaction: insert order + snapshots + outbox command
-        D-->>O: Committed PENDING order
-        O-->>G: 202 + Location
+        alt Product circuit is open
+            O-->>G: 503 without a network call
+        else Product circuit permits the call
+            O->>P: GET product batch (bounded timeout)
+            alt transient network/5xx failure
+                P--xO: Transient failure
+                O->>P: One bounded retry
+            end
+            P-->>O: Trusted active product data
+            O->>D: Local transaction: insert order + snapshots + outbox command
+            D-->>O: Committed PENDING order
+            O-->>G: 202 + Location
+        end
     end
     G-->>C: Normalized response + correlation ID
 ```
@@ -56,6 +64,7 @@ The second key check plus database uniqueness handles the race where two identic
 | Same key, different request | `409`, no Product call | Prevent key ambiguity |
 | Missing/inactive product | `422`, no order | Business input cannot be accepted |
 | Product timeout/unavailable | `503`, no order | No trusted snapshot exists |
+| Product circuit open | Fast `503`, no network/DB call | Protect the failing dependency and Order resources |
 | Concurrent duplicate insert | Read committed winner | DB unique constraint closes race |
 | Another customer reads order | `404` | Enforce ownership without leaking existence |
 

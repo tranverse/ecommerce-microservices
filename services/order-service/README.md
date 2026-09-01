@@ -38,7 +38,7 @@ The response stores Product Service's trusted SKU, name, unit price, and currenc
 2. Order validates the JWT again and derives `customerId` from `sub`.
 3. It canonicalizes the item list and hashes the request.
 4. An existing matching `(customerId, Idempotency-Key)` is returned immediately; a different hash returns `409`.
-5. Order makes one sorted batch call to Product Service with explicit connection/read timeouts and the correlation ID.
+5. Order makes one sorted batch call to Product Service with explicit connection/read timeouts, one safe transient retry, a circuit breaker, and the correlation ID.
 6. Missing, inactive, malformed, or mixed-currency products reject the request before persistence.
 7. A short local transaction writes the order, item snapshots, and one `InventoryReservationRequested` outbox row to `order_db`.
 
@@ -95,7 +95,9 @@ Inventory release is a compensating action. The earlier reservation was committe
 - Missing/inactive product or mixed currency: `422 INVALID_ORDER_ITEM`.
 - Order owned by another subject: `404 ORDER_NOT_FOUND`, avoiding resource enumeration.
 - Malformed/invalid input: stable sanitized `400` response.
-- No automatic HTTP retry is used. The current read is technically safe to retry, but a retry/circuit-breaker policy will be introduced with measured resilience behavior rather than hidden defaults.
+- Product network/5xx failure: one retry; repeated failed lookups open the circuit and later requests fail fast.
+- Product 4xx failure: no retry and no circuit-breaker failure count because the same deterministic request will not improve with waiting.
+- No fallback price is used; accepting stale or client-supplied commercial data would violate Product ownership.
 
 ## Database
 
@@ -117,8 +119,15 @@ Detail/idempotency queries use an entity graph to fetch items in one query. Pagi
 | `ORDER_AUTH_CONNECT_TIMEOUT` | No | `PT2S` |
 | `ORDER_AUTH_READ_TIMEOUT` | No | `PT2S` |
 | `ORDER_PRODUCT_SERVICE_URL` | No | `http://localhost:8083` |
-| `ORDER_PRODUCT_CONNECT_TIMEOUT` | No | `PT2S` |
-| `ORDER_PRODUCT_READ_TIMEOUT` | No | `PT3S` |
+| `ORDER_PRODUCT_CONNECT_TIMEOUT` | No | `PT0.5S` |
+| `ORDER_PRODUCT_READ_TIMEOUT` | No | `PT1.5S` |
+| `ORDER_PRODUCT_RETRY_MAX_ATTEMPTS` | No | `2` |
+| `ORDER_PRODUCT_RETRY_WAIT_DURATION` | No | `PT0.1S` |
+| `ORDER_PRODUCT_CB_FAILURE_RATE_THRESHOLD` | No | `50` |
+| `ORDER_PRODUCT_CB_SLIDING_WINDOW_SIZE` | No | `10` |
+| `ORDER_PRODUCT_CB_MINIMUM_CALLS` | No | `5` |
+| `ORDER_PRODUCT_CB_HALF_OPEN_CALLS` | No | `2` |
+| `ORDER_PRODUCT_CB_OPEN_WAIT_DURATION` | No | `PT10S` |
 | `KAFKA_BOOTSTRAP_SERVERS` | No | `localhost:9092` |
 | `ORDER_KAFKA_CONSUMER_GROUP` | No | `order-service-v1` |
 | `INVENTORY_EVENTS_TOPIC` | No | `inventory.events.v1` |
@@ -138,6 +147,6 @@ From the repository root:
 docker build -f services/order-service/Dockerfile -t ecommerce/order-service:local .
 ```
 
-The 49 tests cover aggregate transitions/invariants, repository constraints and fetch behavior on PostgreSQL 17.6, request canonicalization, Product contract/failure mapping, idempotency races, MVC security/validation, ownership, Flyway, strict Inventory/Payment event parsing, saga transition/rollback behavior, terminal confirmation, compensation, outbox/inbox semantics, and real Kafka/PostgreSQL flows.
+The tests cover aggregate transitions/invariants, repository constraints and fetch behavior on PostgreSQL 17.6, request canonicalization, Product contract/failure mapping and resilience state transitions, idempotency races, MVC security/validation, ownership, Flyway, strict Inventory/Payment event parsing, saga transition/rollback behavior, terminal confirmation, compensation, outbox/inbox semantics, and real Kafka/PostgreSQL flows.
 
 The multi-stage image contains a Java 21 JRE runtime, runs as the non-root `spring` user, has a readiness health check, and uses container memory-aware JVM settings.

@@ -51,8 +51,16 @@ order:
     read-timeout: ${ORDER_AUTH_READ_TIMEOUT:PT2S}
   product-catalog:
     base-url: ${ORDER_PRODUCT_SERVICE_URL:http://localhost:8083}
-    connect-timeout: ${ORDER_PRODUCT_CONNECT_TIMEOUT:PT2S}
-    read-timeout: ${ORDER_PRODUCT_READ_TIMEOUT:PT3S}
+    connect-timeout: ${ORDER_PRODUCT_CONNECT_TIMEOUT:PT0.5S}
+    read-timeout: ${ORDER_PRODUCT_READ_TIMEOUT:PT1.5S}
+    resilience:
+      max-attempts: ${ORDER_PRODUCT_RETRY_MAX_ATTEMPTS:2}
+      retry-wait-duration: ${ORDER_PRODUCT_RETRY_WAIT_DURATION:PT0.1S}
+      failure-rate-threshold: ${ORDER_PRODUCT_CB_FAILURE_RATE_THRESHOLD:50}
+      sliding-window-size: ${ORDER_PRODUCT_CB_SLIDING_WINDOW_SIZE:10}
+      minimum-number-of-calls: ${ORDER_PRODUCT_CB_MINIMUM_CALLS:5}
+      permitted-calls-in-half-open-state: ${ORDER_PRODUCT_CB_HALF_OPEN_CALLS:2}
+      open-state-wait-duration: ${ORDER_PRODUCT_CB_OPEN_WAIT_DURATION:PT10S}
 
 saga:
   messaging:

@@ -40,5 +40,5 @@ The order cannot be accepted without a trusted price, so synchronous communicati
 - Existing idempotent replays do not depend on Product availability.
 - Order reads never need Product to reconstruct historical lines.
 - Internal REST calls bypass Gateway and propagate correlation IDs.
-- Automatic retry is not enabled until resilience policy and metrics are implemented.
+- The safe Product batch GET uses the bounded retry and circuit-breaker policy defined by [ADR 011](011-order-product-resilience.md).
 - The future transactional outbox must be inserted in the same local transaction as the initial order state.

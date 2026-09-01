@@ -7,6 +7,7 @@ import com.example.ecommerce.order.dto.CreateOrderRequest;
 import com.example.ecommerce.order.dto.OrderResponse;
 import com.example.ecommerce.order.dto.PageResponse;
 import com.example.ecommerce.order.exception.ApiErrorResponse;
+import com.example.ecommerce.order.exception.ProductCatalogUnavailableException;
 import com.example.ecommerce.order.repository.CustomerOrderRepository;
 import com.example.ecommerce.order.repository.OutboxEventRepository;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -194,6 +195,27 @@ class OrderApiIntegrationTest {
         assertThat(invalid.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
         assertThat(invalid.getBody()).extracting(ApiErrorResponse::errorCode)
                 .isEqualTo("VALIDATION_ERROR");
+    }
+
+    @Test
+    void returnsServiceUnavailableWithoutPersistingWhenProductCatalogIsUnavailable() {
+        when(productCatalogClient.getProducts(Set.of(productId)))
+                .thenThrow(new ProductCatalogUnavailableException());
+
+        ResponseEntity<ApiErrorResponse> response = exchange(
+                "/api/v1/orders",
+                HttpMethod.POST,
+                new CreateOrderRequest(List.of(new CreateOrderItemRequest(productId, 1))),
+                USER_ONE_TOKEN,
+                "checkout-catalog-unavailable-001",
+                ApiErrorResponse.class
+        );
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
+        assertThat(response.getBody()).extracting(ApiErrorResponse::errorCode)
+                .isEqualTo("PRODUCT_CATALOG_UNAVAILABLE");
+        assertThat(repository.count()).isZero();
+        assertThat(outboxRepository.count()).isZero();
     }
 
     private <T> ResponseEntity<T> exchange(

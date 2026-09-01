@@ -57,9 +57,9 @@ The application pre-check saves work, but only the database unique constraint is
 
 ## Timeout vs Retry
 
-Timeouts are mandatory; retries are a business decision. Order currently sets a two-second Product connection timeout and three-second read timeout, then returns a sanitized `503` without saving an order.
+Timeouts are mandatory; retries are a business decision. Order sets a 500-millisecond Product connection timeout and 1.5-second read timeout. Because the Product batch lookup is an idempotent GET, Order may retry one transient network/5xx failure after 100 milliseconds. HTTP 4xx failures are not retried because repeating the same invalid request cannot repair it.
 
-The Product lookup is a GET and could support a small retry later, but retries can amplify an outage. We defer them until circuit-breaker/metrics work can make the policy visible and testable. Gateway does not retry `POST /orders`; the client uses its idempotency key when retrying after an ambiguous response.
+A circuit breaker surrounds the complete retry sequence and opens after repeated failed lookups. It then fails fast with a sanitized `503` without saving an order. Gateway does not retry `POST /orders`; the client uses its idempotency key when retrying after an ambiguous response. See [Timeouts, Retries, and Circuit Breakers](15-timeouts-retries-and-circuit-breakers.md).
 
 ## Trade-offs
 

@@ -525,8 +525,15 @@ Order Service supports:
 | `ORDER_AUTH_ISSUER` | Exact trusted JWT issuer | `http://localhost:8081` |
 | `ORDER_AUTH_JWKS_URI` | Auth public-key endpoint | `http://localhost:8081/.well-known/jwks.json` |
 | `ORDER_PRODUCT_SERVICE_URL` | Direct internal Product endpoint | `http://localhost:8083` |
-| `ORDER_PRODUCT_CONNECT_TIMEOUT` | Product connection timeout | `PT2S` |
-| `ORDER_PRODUCT_READ_TIMEOUT` | Product response timeout | `PT3S` |
+| `ORDER_PRODUCT_CONNECT_TIMEOUT` | Product connection timeout | `PT0.5S` |
+| `ORDER_PRODUCT_READ_TIMEOUT` | Product response timeout | `PT1.5S` |
+| `ORDER_PRODUCT_RETRY_MAX_ATTEMPTS` | Total Product GET attempts, capped at 3 | `2` |
+| `ORDER_PRODUCT_RETRY_WAIT_DURATION` | Delay before the one transient retry | `PT0.1S` |
+| `ORDER_PRODUCT_CB_FAILURE_RATE_THRESHOLD` | Failed logical-call percentage that opens the circuit | `50` |
+| `ORDER_PRODUCT_CB_SLIDING_WINDOW_SIZE` | Logical calls retained by the breaker | `10` |
+| `ORDER_PRODUCT_CB_MINIMUM_CALLS` | Calls required before failure-rate evaluation | `5` |
+| `ORDER_PRODUCT_CB_HALF_OPEN_CALLS` | Recovery probes allowed while half-open | `2` |
+| `ORDER_PRODUCT_CB_OPEN_WAIT_DURATION` | Open interval before recovery probes | `PT10S` |
 
 Payment Service supports:
 
@@ -671,8 +678,9 @@ Start with:
 12. [Saga Compensation and Eventual Consistency](docs/learning/12-saga-compensation-and-eventual-consistency.md)
 13. [Asynchronous Notifications and Delivery Semantics](docs/learning/13-asynchronous-notifications-and-delivery-semantics.md)
 14. [Docker Compose and Service Networking](docs/learning/14-docker-compose-and-networking.md)
-15. Read the ADRs and compare their alternatives.
-16. Follow the Gateway, Auth, User, Product, Inventory, Order, Payment, and Notification READMEs from adapters to application services, domains, repositories, migrations, and tests.
+15. [Timeouts, Retries, and Circuit Breakers](docs/learning/15-timeouts-retries-and-circuit-breakers.md)
+16. Read the ADRs and compare their alternatives.
+17. Follow the Gateway, Auth, User, Product, Inventory, Order, Payment, and Notification READMEs from adapters to application services, domains, repositories, migrations, and tests.
 
 Later notes will reference the exact service, class, endpoint, migration, event, and configuration that implements each concept.
 
