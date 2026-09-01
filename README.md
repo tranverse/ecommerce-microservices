@@ -2,7 +2,7 @@
 
 A production-style Java 21 and Spring Boot 3 e-commerce system built incrementally as both a runnable distributed application and a practical microservices course.
 
-> **Implementation status:** API Gateway, Auth, User, Product, Inventory, Order, Payment, and Notification are implemented, containerized, and wired into one Docker Compose environment. The Kafka saga confirms orders and inventory after payment success, or releases inventory and cancels orders after payment failure. Notification consumes the terminal Order fact idempotently without blocking that workflow. Automatic profile provisioning remains a planned milestone.
+> **Implementation status:** API Gateway, Auth, User, Product, Inventory, Order, Payment, and Notification are implemented, containerized, and wired into one Docker Compose environment. The Kafka saga confirms orders and inventory after payment success, or releases inventory and cancels orders after payment failure. Notification consumes the terminal Order fact idempotently without blocking that workflow. Metrics, distributed tracing, structured centralized logs, and a provisioned Grafana dashboard cover the connected runtime. Automatic profile provisioning remains a planned milestone.
 
 ## Project Overview
 
@@ -82,9 +82,10 @@ Detailed ownership and prohibited coupling are documented in [Service Boundaries
 | Spring Cloud Gateway | Reactive edge routing without business logic | Active |
 | Kafka | Durable asynchronous saga communication and notifications | Active through terminal Order outcomes and Notification delivery |
 | Testcontainers | Integration tests against real PostgreSQL/Kafka behavior | Active for PostgreSQL and Kafka |
-| Resilience4j | Bounded failure handling for justified synchronous calls | Planned |
-| Micrometer/OpenTelemetry | Metrics and distributed traces | Planned |
-| Docker Compose | Reproducible complete local environment | Planned |
+| Resilience4j | Bounded failure handling for justified synchronous calls | Active for Order-to-Product |
+| Micrometer/OpenTelemetry | Prometheus metrics and OTLP distributed traces | Active across all applications |
+| Grafana, Tempo, Loki, Alloy | Dashboards, trace storage, centralized logs and collection | Active in local Compose |
+| Docker Compose | Reproducible complete local environment | Active with E2E verification |
 
 Redis and Kubernetes are deliberately deferred until a concrete need exists and Docker Compose works end to end.
 
@@ -218,9 +219,9 @@ These mechanisms will not be added before their failure scenario exists in code.
 
 ## Observability
 
-Every inbound request will receive or preserve a correlation ID. It will propagate through HTTP, Kafka metadata, and logs. Actuator health, Micrometer metrics, and OpenTelemetry-compatible tracing will be introduced after the connected workflow exists so the signals describe real behavior.
+Every inbound request receives or preserves a safe correlation ID, which propagates through HTTP, Kafka envelopes, and structured JSON logs. All eight applications expose Micrometer metrics to Prometheus and export sampled OpenTelemetry spans to Tempo. Grafana Alloy collects explicitly labelled application stdout into Loki. Grafana provisions all three data sources and the **E-Commerce Service Overview** dashboard.
 
-Sensitive values such as passwords, raw tokens, private keys, and payment details must never be logged.
+Trace IDs correlate synchronous request segments and link Tempo to Loki. Correlation IDs remain stable across the longer outbox/Kafka saga. Neither is used as a metric or stream label, preventing high-cardinality growth. Sensitive values such as passwords, raw tokens, private keys, and payment details must never be logged. See [Observability Architecture](docs/architecture/observability.md) and [Observability Request Flow](docs/flows/observability-flow.md).
 
 ## Running Locally
 
@@ -426,13 +427,14 @@ docker build -f services/notification-service/Dockerfile -t ecommerce/notificati
 
 ## Full local stack with Docker Compose
 
-Compose starts eight applications, one Kafka KRaft broker, and one PostgreSQL server containing seven service-owned databases/users. Co-location saves local memory; it does not permit shared tables or credentials.
+Compose starts eight applications, one Kafka KRaft broker, one PostgreSQL server containing seven service-owned databases/users, and the Prometheus/Tempo/Loki/Alloy/Grafana observability stack. Co-location saves local memory; it does not permit shared tables or credentials.
 
 ```powershell
 Copy-Item .env.example .env
 docker compose up --build -d
 docker compose ps
 ./scripts/verify-compose.ps1
+./scripts/verify-observability.ps1
 ```
 
 Use the Gateway at `http://localhost:8080`. Ports `8081` through `8087`, PostgreSQL `5432`, and Kafka `9092` are bound to `127.0.0.1` for local inspection only. Containers call each other through Compose DNS such as `auth-service:8081`, `product-service:8083`, `postgres:5432`, and `kafka:19092`; `localhost` inside a container refers only to that container.
@@ -446,7 +448,9 @@ docker compose logs -f order-service inventory-service payment-service notificat
 docker compose down
 ```
 
-The smoke script seeds a unique product and stock item, registers a customer through Gateway, submits an order, and verifies `Order=CONFIRMED`, `Inventory=CONFIRMED`, `Payment=COMPLETED`, and `Notification=SENT`. Its direct Product/Inventory setup calls and database assertions are local test-harness behavior, not production access patterns.
+The smoke script seeds a unique product and stock item, registers a customer through Gateway, submits an order, and verifies `Order=CONFIRMED`, `Inventory=CONFIRMED`, `Payment=COMPLETED`, and `Notification=SENT`. Its direct Product/Inventory setup calls and database assertions are local test-harness behavior, not production access patterns. The observability script waits for and verifies Prometheus, Tempo, Loki, Alloy, Grafana, all eight application scrape targets, and the expected Compose processes.
+
+Grafana is available at `http://localhost:3000`, Prometheus at `http://localhost:9090`, Tempo at `http://localhost:3200`, Loki at `http://localhost:3100`, and Alloy at `http://localhost:12345`. All ports are loopback-only. Grafana credentials and tracing sample probability are configured in `.env` from development-only examples.
 
 Named PostgreSQL and Kafka volumes survive `down`. `docker compose down -v` is an intentional destructive reset. See [Docker Compose and Networking](docs/learning/14-docker-compose-and-networking.md) and [ADR 010](docs/decisions/010-local-compose-topology.md).
 
@@ -562,6 +566,19 @@ Notification Service supports:
 
 Messaging services share `KAFKA_BOOTSTRAP_SERVERS`, defaulting to `localhost:9092`. A real `.env` file is ignored and never committed.
 
+Observability supports:
+
+| Variable | Purpose | Default |
+| --- | --- | --- |
+| `OTEL_TRACING_EXPORT_ENABLED` | Export OpenTelemetry spans to Tempo | `false` outside Compose; `true` in Compose |
+| `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` | OTLP/HTTP trace ingest endpoint | `http://localhost:4318/v1/traces` |
+| `MANAGEMENT_TRACING_SAMPLING_PROBABILITY` | Fraction of traces retained, from `0.0` to `1.0` | `0.1`; Compose uses `1.0` locally |
+| `LOGGING_STRUCTURED_FORMAT_CONSOLE` | Structured console log format used by Alloy/Loki | Human-readable outside Compose; `logstash` in Compose |
+| `GRAFANA_ADMIN_USER` | Local Grafana administrator username | Development-only value from `.env` |
+| `GRAFANA_ADMIN_PASSWORD` | Local Grafana administrator password | Development-only value from `.env` |
+
+Prometheus metrics are intentionally unauthenticated for local scraping, but their ports and all service actuator ports are loopback-only. Production deployments must restrict these endpoints at the network layer and supply real secrets through the platform secret store.
+
 ## API Examples
 
 Register credentials:
@@ -638,7 +655,7 @@ Run every implemented service suite:
 .\mvnw.cmd test
 ```
 
-Product has 20 tests, Inventory has 28 including concurrent reservation and real Kafka/PostgreSQL flows, Auth has 15 covering cryptography/token lifecycle, User has 17 covering resource-server security and ownership, Gateway has 9 covering routing and edge behavior, Order has 49 covering acceptance, outbox/inbox, strict Inventory/Payment event parsing, terminal state transitions, compensation, and real Kafka/PostgreSQL flows, Payment has 33 covering state transitions, database constraints, provider retry/refund semantics, strict event contracts, outbox/inbox behavior, and real Kafka/PostgreSQL flows, and Notification has 17 covering delivery state, strict terminal event parsing, duplicates, provider failure, contradictory/corrupted outcomes, and a real Kafka/PostgreSQL flow. The implemented reactor currently has 188 tests. Each service uses the smallest meaningful combination of unit, controller, repository, integration, security, proxy, and Testcontainers tests.
+Product has 20 tests, Inventory has 28 including concurrent reservation and real Kafka/PostgreSQL flows, Auth has 16 covering cryptography/token lifecycle and metrics security, User has 18 covering resource-server security, ownership, and metrics security, Gateway has 10 covering routing, edge behavior, and metrics security, Order has 55 covering acceptance, Product resilience, metrics security, outbox/inbox, strict Inventory/Payment event parsing, terminal state transitions, compensation, and real Kafka/PostgreSQL flows, Payment has 33 covering state transitions, database constraints, provider retry/refund semantics, strict event contracts, outbox/inbox behavior, and real Kafka/PostgreSQL flows, and Notification has 17 covering delivery state, strict terminal event parsing, duplicates, provider failure, contradictory/corrupted outcomes, and a real Kafka/PostgreSQL flow. The implemented reactor currently has 197 tests. Each service uses the smallest meaningful combination of unit, controller, repository, integration, security, proxy, and Testcontainers tests.
 
 ## Documentation
 
@@ -647,6 +664,7 @@ Product has 20 tests, Inventory has 28 including concurrent reservation and real
 - [Database architecture](docs/architecture/database-architecture.md)
 - [Communication policy](docs/architecture/communication.md)
 - [Security architecture](docs/architecture/security.md)
+- [Observability architecture](docs/architecture/observability.md)
 - [Authentication flow](docs/flows/authentication-flow.md)
 - [User profile flow](docs/flows/user-profile-flow.md)
 - [API Gateway request flow](docs/flows/gateway-request-flow.md)
@@ -655,6 +673,7 @@ Product has 20 tests, Inventory has 28 including concurrent reservation and real
 - [Order creation flow](docs/flows/order-creation-flow.md)
 - [Payment processing flow](docs/flows/payment-processing-flow.md)
 - [Notification delivery flow](docs/flows/notification-flow.md)
+- [Observability request flow](docs/flows/observability-flow.md)
 - [Architecture decisions](docs/decisions/)
 - [Learning notes](docs/learning/)
 
@@ -679,8 +698,11 @@ Start with:
 13. [Asynchronous Notifications and Delivery Semantics](docs/learning/13-asynchronous-notifications-and-delivery-semantics.md)
 14. [Docker Compose and Service Networking](docs/learning/14-docker-compose-and-networking.md)
 15. [Timeouts, Retries, and Circuit Breakers](docs/learning/15-timeouts-retries-and-circuit-breakers.md)
-16. Read the ADRs and compare their alternatives.
-17. Follow the Gateway, Auth, User, Product, Inventory, Order, Payment, and Notification READMEs from adapters to application services, domains, repositories, migrations, and tests.
+16. [Correlation IDs](docs/learning/16-correlation-ids.md)
+17. [Distributed Tracing](docs/learning/17-distributed-tracing.md)
+18. [Metrics and Centralized Logging](docs/learning/18-metrics-and-centralized-logging.md)
+19. Read the ADRs and compare their alternatives.
+20. Follow the Gateway, Auth, User, Product, Inventory, Order, Payment, and Notification READMEs from adapters to application services, domains, repositories, migrations, and tests.
 
 Later notes will reference the exact service, class, endpoint, migration, event, and configuration that implements each concept.
 

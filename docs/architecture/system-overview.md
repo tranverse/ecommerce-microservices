@@ -8,7 +8,7 @@ The platform supports a customer journey from registration and login through pro
 
 ## Current state
 
-API Gateway, Auth, User, Product, Inventory, Order orchestration, Payment, and Notification are implemented, containerized, tested, documented, and connected by Docker Compose. Gateway routes Order traffic and applies coarse roles; Order validates Auth JWTs again, scopes data to `sub`, obtains trusted Product snapshots through one bounded batch call, and commits the order plus its first saga command only to `order_db`. Inventory consumes reservation and status commands idempotently from `inventory_db`. Order records Inventory outcomes in its inbox: success atomically moves the order to `PAYMENT_PENDING` and creates `PaymentRequested`; reservation failure cancels it. Payment calls its idempotent provider port outside a database transaction, then atomically commits the terminal payment state, inbox, and `PaymentCompleted` or `PaymentFailed` outbox in `payment_db`. Order consumes that outcome: success confirms the order and requests inventory confirmation, while failure cancels the order and requests inventory release. Notification consumes the resulting `OrderConfirmed` or `OrderCancelled`, stores an idempotent delivery record in `notification_db`, and simulates delivery without blocking Order. Product and Inventory management APIs still need their own resource-server enforcement before direct exposure is safe. Registration-to-profile auto-provisioning remains pending. A component is not considered implemented until its code, tests, runtime configuration, and documentation are present.
+API Gateway, Auth, User, Product, Inventory, Order orchestration, Payment, and Notification are implemented, containerized, tested, documented, and connected by Docker Compose. Gateway routes Order traffic and applies coarse roles; Order validates Auth JWTs again, scopes data to `sub`, obtains trusted Product snapshots through one bounded batch call, and commits the order plus its first saga command only to `order_db`. Inventory consumes reservation and status commands idempotently from `inventory_db`. Order records Inventory outcomes in its inbox: success atomically moves the order to `PAYMENT_PENDING` and creates `PaymentRequested`; reservation failure cancels it. Payment calls its idempotent provider port outside a database transaction, then atomically commits the terminal payment state, inbox, and `PaymentCompleted` or `PaymentFailed` outbox in `payment_db`. Order consumes that outcome: success confirms the order and requests inventory confirmation, while failure cancels the order and requests inventory release. Notification consumes the resulting `OrderConfirmed` or `OrderCancelled`, stores an idempotent delivery record in `notification_db`, and simulates delivery without blocking Order. Prometheus metrics, OpenTelemetry traces through Tempo, JSON logs through Alloy/Loki, and a provisioned Grafana dashboard now cover all eight applications. Product and Inventory management APIs still need their own resource-server enforcement before direct exposure is safe. Registration-to-profile auto-provisioning remains pending. A component is not considered implemented until its code, tests, runtime configuration, and documentation are present.
 
 ## Target architecture
 
@@ -53,6 +53,7 @@ flowchart LR
 8. Event consumers assume at-least-once delivery and implement idempotency.
 9. Correlation IDs cross HTTP, events, and logs.
 10. Optional infrastructure is added only after a demonstrated need.
+11. Metric and log labels use bounded dimensions; trace and correlation identifiers remain query fields.
 
 ## Main flows
 
@@ -104,6 +105,6 @@ Synchronous acceptance through `202`, the asynchronous saga through a terminal O
 
 ## Deployment view
 
-Local development uses Docker Compose, one container per application, Kafka, and a PostgreSQL server hosting separate logical databases and users. Compose DNS supplies internal addresses; only loopback host ports are published for local access. Production deployment may isolate databases physically without changing service ownership.
+Local development uses Docker Compose, one container per application, Kafka, a PostgreSQL server hosting separate logical databases and users, and a single-node observability stack. Compose DNS supplies internal addresses; only loopback host ports are published for local access. Production deployment may isolate databases physically and replace local observability storage without changing application protocols or service ownership.
 
 Kubernetes is intentionally deferred until the complete Docker Compose environment works and has passing end-to-end validation.

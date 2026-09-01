@@ -27,7 +27,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
 
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@SpringBootTest(
+        properties = "management.prometheus.metrics.export.enabled=true",
+        webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT
+)
 class GatewayRoutingIntegrationTest {
 
     private static final AtomicInteger DOWNSTREAM_REQUESTS = new AtomicInteger();
@@ -114,6 +117,18 @@ class GatewayRoutingIntegrationTest {
                 .jsonPath("$.path").isEqualTo("/api/v1/products/search");
 
         assertThat(DOWNSTREAM_REQUESTS).hasValue(2);
+    }
+
+    @Test
+    void exposesPrometheusMetricsWithoutAuthentication() {
+        webTestClient.get()
+                .uri("/actuator/prometheus")
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody(String.class)
+                .value(body -> assertThat(body).contains("jvm_memory_used_bytes"));
+
+        assertThat(DOWNSTREAM_REQUESTS).hasValue(0);
     }
 
     @Test

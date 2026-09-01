@@ -54,6 +54,7 @@ public class SecurityConfiguration {
                                 "/.well-known/jwks.json",
                                 "/actuator/health/**",
                                 "/actuator/info",
+                                "/actuator/prometheus",
                                 "/v3/api-docs/**",
                                 "/swagger-ui/**",
                                 "/swagger-ui.html"

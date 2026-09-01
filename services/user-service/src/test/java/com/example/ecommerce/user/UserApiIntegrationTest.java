@@ -30,7 +30,10 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.when;
 
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@SpringBootTest(
+        properties = "management.prometheus.metrics.export.enabled=true",
+        webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT
+)
 @Import(TestcontainersConfiguration.class)
 class UserApiIntegrationTest {
 
@@ -107,6 +110,14 @@ class UserApiIntegrationTest {
         );
         assertThat(switched.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(switched.getBody()).extracting(AddressResponse::defaultAddress).isEqualTo(true);
+    }
+
+    @Test
+    void exposesPrometheusMetricsWithoutAuthentication() {
+        ResponseEntity<String> metrics = restTemplate.getForEntity("/actuator/prometheus", String.class);
+
+        assertThat(metrics.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(metrics.getBody()).contains("jvm_memory_used_bytes");
     }
 
     @Test

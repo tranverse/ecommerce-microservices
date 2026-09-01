@@ -34,7 +34,8 @@ public class GatewaySecurityConfiguration {
                                 "/api/v1/auth/**",
                                 "/.well-known/jwks.json",
                                 "/actuator/health/**",
-                                "/actuator/info"
+                                "/actuator/info",
+                                "/actuator/prometheus"
                         ).permitAll()
                         .pathMatchers(HttpMethod.GET, "/api/v1/products/**").permitAll()
                         .pathMatchers("/api/v1/users/**").hasAnyRole("CUSTOMER", "ADMIN")

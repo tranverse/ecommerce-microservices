@@ -40,7 +40,10 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@SpringBootTest(
+        properties = "management.prometheus.metrics.export.enabled=true",
+        webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT
+)
 @Import(TestcontainersConfiguration.class)
 class OrderApiIntegrationTest {
 
@@ -167,6 +170,14 @@ class OrderApiIntegrationTest {
         assertThat(ownOrders.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(ownOrders.getBody()).isNotNull();
         assertThat(ownOrders.getBody().totalElements()).isEqualTo(1);
+    }
+
+    @Test
+    void exposesPrometheusMetricsWithoutAuthentication() {
+        ResponseEntity<String> metrics = restTemplate.getForEntity("/actuator/prometheus", String.class);
+
+        assertThat(metrics.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(metrics.getBody()).contains("jvm_memory_used_bytes");
     }
 
     @Test
