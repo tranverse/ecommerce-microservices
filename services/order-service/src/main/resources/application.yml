@@ -71,6 +71,14 @@ saga:
     inventory-events-topic: ${INVENTORY_EVENTS_TOPIC:inventory.events.v1}
     payment-events-topic: ${PAYMENT_EVENTS_TOPIC:payment.events.v1}
 
+messaging:
+  consumer-reliability:
+    max-retries: ${KAFKA_CONSUMER_MAX_RETRIES:3}
+    initial-interval: ${KAFKA_CONSUMER_RETRY_INITIAL_INTERVAL:PT0.25S}
+    multiplier: ${KAFKA_CONSUMER_RETRY_MULTIPLIER:2.0}
+    max-interval: ${KAFKA_CONSUMER_RETRY_MAX_INTERVAL:PT2S}
+    recovery-timeout: ${KAFKA_DLT_PUBLISH_TIMEOUT:PT5S}
+
 outbox:
   publisher:
     enabled: ${OUTBOX_PUBLISHER_ENABLED:true}

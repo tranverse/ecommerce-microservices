@@ -183,7 +183,7 @@ InventoryReleaseRequested
 OrderConfirmed | OrderCancelled
 ```
 
-Messages include event identity, version, timestamp, aggregate ID, and correlation ID. Order, Inventory, and Payment producers persist messages in transactional outboxes. Consumers assume at-least-once delivery, validate the v1 contract, record processed event IDs in a local inbox, and send poison messages to a DLT. Technical failures receive bounded retry; invalid or state-conflicting messages do not. Notification reacts directly to terminal Order facts, so an extra `NotificationRequested` command is unnecessary.
+Messages include event identity, version, timestamp, aggregate ID, and correlation ID. Order, Inventory, and Payment producers persist messages in transactional outboxes. Consumers assume at-least-once delivery, validate the v1 contract, record processed event IDs in a local inbox, and send poison messages to a DLT. Technical failures receive bounded exponential retry; invalid or state-conflicting messages do not. DLT publication must be broker-acknowledged, failure/recovery metrics are exported, and replay targets one explicit topic/partition/offset. Notification reacts directly to terminal Order facts, so an extra `NotificationRequested` command is unnecessary.
 
 ## Order Workflow
 
@@ -205,7 +205,7 @@ Notification Service consumes strict `OrderConfirmed` and `OrderCancelled` v1 ev
 
 ## Reliability
 
-The target design uses:
+The implemented design uses:
 
 - Explicit connection and response timeouts
 - Bounded retries only for transient idempotent operations
@@ -214,8 +214,9 @@ The target design uses:
 - Processed-event uniqueness for consumer idempotency
 - Validated order state transitions
 - Compensation rather than cross-service rollback
+- Acknowledged dead-letter publication, bounded consumer retry, and explicit idempotent replay
 
-These mechanisms will not be added before their failure scenario exists in code.
+Each mechanism is paired with a concrete failure scenario and test; additional resilience is added only when another dependency justifies it.
 
 ## Observability
 
@@ -441,6 +442,17 @@ Use the Gateway at `http://localhost:8080`. Ports `8081` through `8087`, Postgre
 
 Kafka automatic topic creation is disabled. The one-shot `kafka-init` service creates the five versioned workflow topics and their DLTs before consumers start. Application readiness checks gate dependent startup, but they do not replace runtime timeout/retry/circuit-breaker behavior.
 
+Inspect one DLT record without exposing its payload or changing Kafka state:
+
+```powershell
+.\scripts\replay-dlt-record.ps1 `
+  -OriginalTopic payment.commands.v1 `
+  -Partition 0 `
+  -Offset 42
+```
+
+After fixing the cause, rerun with `-Execute` to publish exactly that key/value back to the original topic. The DLT record is retained for audit. See [Kafka Consumer Failure Flow](docs/flows/kafka-failure-flow.md) and [ADR 013](docs/decisions/013-kafka-consumer-reliability.md).
+
 Inspect or stop the environment with:
 
 ```powershell
@@ -566,6 +578,16 @@ Notification Service supports:
 
 Messaging services share `KAFKA_BOOTSTRAP_SERVERS`, defaulting to `localhost:9092`. A real `.env` file is ignored and never committed.
 
+Kafka-consuming services share this validated reliability policy:
+
+| Variable | Purpose | Default |
+| --- | --- | --- |
+| `KAFKA_CONSUMER_MAX_RETRIES` | Retries after the initial delivery attempt | `3` |
+| `KAFKA_CONSUMER_RETRY_INITIAL_INTERVAL` | First blocking backoff interval | `PT0.25S` |
+| `KAFKA_CONSUMER_RETRY_MULTIPLIER` | Exponential backoff multiplier | `2.0` |
+| `KAFKA_CONSUMER_RETRY_MAX_INTERVAL` | Maximum delay between attempts | `PT2S` |
+| `KAFKA_DLT_PUBLISH_TIMEOUT` | Maximum wait for broker acknowledgement of DLT publication | `PT5S` |
+
 Observability supports:
 
 | Variable | Purpose | Default |
@@ -655,7 +677,7 @@ Run every implemented service suite:
 .\mvnw.cmd test
 ```
 
-Product has 20 tests, Inventory has 28 including concurrent reservation and real Kafka/PostgreSQL flows, Auth has 16 covering cryptography/token lifecycle and metrics security, User has 18 covering resource-server security, ownership, and metrics security, Gateway has 10 covering routing, edge behavior, and metrics security, Order has 55 covering acceptance, Product resilience, metrics security, outbox/inbox, strict Inventory/Payment event parsing, terminal state transitions, compensation, and real Kafka/PostgreSQL flows, Payment has 33 covering state transitions, database constraints, provider retry/refund semantics, strict event contracts, outbox/inbox behavior, and real Kafka/PostgreSQL flows, and Notification has 17 covering delivery state, strict terminal event parsing, duplicates, provider failure, contradictory/corrupted outcomes, and a real Kafka/PostgreSQL flow. The implemented reactor currently has 197 tests. Each service uses the smallest meaningful combination of unit, controller, repository, integration, security, proxy, and Testcontainers tests.
+Product has 20 tests, Inventory has 29 including concurrent reservation plus real Kafka/PostgreSQL success and DLT flows, Auth has 16 covering cryptography/token lifecycle and metrics security, User has 18 covering resource-server security, ownership, and metrics security, Gateway has 10 covering routing, edge behavior, and metrics security, Order has 56 covering acceptance, Product resilience, metrics security, outbox/inbox, strict Inventory/Payment event parsing, terminal state transitions, compensation, and real Kafka/PostgreSQL success/DLT flows, Payment has 36 covering state transitions, database constraints, provider retry/refund semantics, bounded transient retry, exhausted recovery, strict event contracts, outbox/inbox behavior, and real Kafka/PostgreSQL flows, and Notification has 18 covering delivery state, strict terminal event parsing, duplicates, provider failure, contradictory/corrupted outcomes, and real Kafka/PostgreSQL success/DLT flows. The implemented reactor currently has 203 tests. Each service uses the smallest meaningful combination of unit, controller, repository, integration, security, proxy, and Testcontainers tests.
 
 ## Documentation
 
@@ -673,6 +695,7 @@ Product has 20 tests, Inventory has 28 including concurrent reservation and real
 - [Order creation flow](docs/flows/order-creation-flow.md)
 - [Payment processing flow](docs/flows/payment-processing-flow.md)
 - [Notification delivery flow](docs/flows/notification-flow.md)
+- [Kafka consumer failure flow](docs/flows/kafka-failure-flow.md)
 - [Observability request flow](docs/flows/observability-flow.md)
 - [Architecture decisions](docs/decisions/)
 - [Learning notes](docs/learning/)
@@ -701,8 +724,9 @@ Start with:
 16. [Correlation IDs](docs/learning/16-correlation-ids.md)
 17. [Distributed Tracing](docs/learning/17-distributed-tracing.md)
 18. [Metrics and Centralized Logging](docs/learning/18-metrics-and-centralized-logging.md)
-19. Read the ADRs and compare their alternatives.
-20. Follow the Gateway, Auth, User, Product, Inventory, Order, Payment, and Notification READMEs from adapters to application services, domains, repositories, migrations, and tests.
+19. [Kafka Retries, Dead Letters, and Replay](docs/learning/19-kafka-retries-dead-letters-and-replay.md)
+20. Read the ADRs and compare their alternatives.
+21. Follow the Gateway, Auth, User, Product, Inventory, Order, Payment, and Notification READMEs from adapters to application services, domains, repositories, migrations, and tests.
 
 Later notes will reference the exact service, class, endpoint, migration, event, and configuration that implements each concept.
 

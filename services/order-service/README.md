@@ -129,6 +129,11 @@ Detail/idempotency queries use an entity graph to fetch items in one query. Pagi
 | `ORDER_PRODUCT_CB_HALF_OPEN_CALLS` | No | `2` |
 | `ORDER_PRODUCT_CB_OPEN_WAIT_DURATION` | No | `PT10S` |
 | `KAFKA_BOOTSTRAP_SERVERS` | No | `localhost:9092` |
+| `KAFKA_CONSUMER_MAX_RETRIES` | No | `3` |
+| `KAFKA_CONSUMER_RETRY_INITIAL_INTERVAL` | No | `PT0.25S` |
+| `KAFKA_CONSUMER_RETRY_MULTIPLIER` | No | `2.0` |
+| `KAFKA_CONSUMER_RETRY_MAX_INTERVAL` | No | `PT2S` |
+| `KAFKA_DLT_PUBLISH_TIMEOUT` | No | `PT5S` |
 | `ORDER_KAFKA_CONSUMER_GROUP` | No | `order-service-v1` |
 | `INVENTORY_EVENTS_TOPIC` | No | `inventory.events.v1` |
 | `PAYMENT_EVENTS_TOPIC` | No | `payment.events.v1` |
@@ -147,6 +152,6 @@ From the repository root:
 docker build -f services/order-service/Dockerfile -t ecommerce/order-service:local .
 ```
 
-The tests cover aggregate transitions/invariants, repository constraints and fetch behavior on PostgreSQL 17.6, request canonicalization, Product contract/failure mapping and resilience state transitions, idempotency races, MVC security/validation, ownership, Flyway, strict Inventory/Payment event parsing, saga transition/rollback behavior, terminal confirmation, compensation, outbox/inbox semantics, and real Kafka/PostgreSQL flows.
+The 56 tests cover aggregate transitions/invariants, repository constraints and fetch behavior on PostgreSQL 17.6, request canonicalization, Product contract/failure mapping and resilience state transitions, idempotency races, MVC security/validation, ownership, Flyway, strict Inventory/Payment event parsing, saga transition/rollback behavior, terminal confirmation, compensation, outbox/inbox semantics, and real Kafka/PostgreSQL success and DLT flows.
 
 The multi-stage image contains a Java 21 JRE runtime, runs as the non-root `spring` user, has a readiness health check, and uses container memory-aware JVM settings.

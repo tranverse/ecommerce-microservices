@@ -5,12 +5,19 @@ import com.example.ecommerce.notification.domain.NotificationStatus;
 import com.example.ecommerce.notification.repository.CustomerNotificationRepository;
 import com.example.ecommerce.notification.repository.ProcessedEventRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
+import org.apache.kafka.clients.consumer.ConsumerConfig;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.apache.kafka.clients.consumer.KafkaConsumer;
+import org.apache.kafka.common.serialization.StringDeserializer;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.kafka.core.KafkaTemplate;
+import org.springframework.kafka.support.KafkaHeaders;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -18,7 +25,11 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.kafka.KafkaContainer;
 
+import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
@@ -54,6 +65,9 @@ class NotificationKafkaIntegrationTest {
 
     @Autowired
     private ProcessedEventRepository processedEventRepository;
+
+    @Autowired
+    private MeterRegistry meterRegistry;
 
     @BeforeEach
     void cleanDatabase() {
@@ -91,6 +105,33 @@ class NotificationKafkaIntegrationTest {
         assertThat(processedEventRepository.count()).isEqualTo(2);
     }
 
+    @Test
+    void sendsInvalidOrderEventDirectlyToDltWithOriginalMetadata() throws Exception {
+        UUID orderId = UUID.randomUUID();
+        String invalidValue = "{\"eventType\":\"UnknownOutcome\"}";
+        double failuresBefore = metricCount("ecommerce.kafka.consumer.delivery.failures",
+                "order.events.v1");
+
+        kafkaTemplate.send("order.events.v1", orderId.toString(), invalidValue)
+                .get(10, TimeUnit.SECONDS);
+
+        ConsumerRecord<String, String> dlt = consumeMatching(
+                "order.events.v1.DLT", orderId.toString());
+        assertThat(dlt).isNotNull();
+        assertThat(dlt.value()).isEqualTo(invalidValue);
+        assertThat(headerValue(dlt, KafkaHeaders.DLT_ORIGINAL_TOPIC))
+                .isEqualTo("order.events.v1");
+        assertThat(headerValue(dlt, KafkaHeaders.DLT_EXCEPTION_CAUSE_FQCN))
+                .isEqualTo(InvalidEventException.class.getName());
+        assertThat(dlt.headers().lastHeader(KafkaHeaders.DLT_EXCEPTION_STACKTRACE)).isNull();
+        await(() -> metricCount("ecommerce.kafka.consumer.delivery.failures",
+                "order.events.v1") >= failuresBefore + 1);
+        assertThat(metricCount("ecommerce.kafka.consumer.delivery.failures",
+                "order.events.v1") - failuresBefore).isEqualTo(1.0);
+        assertThat(processedEventRepository.count()).isZero();
+        assertThat(notificationRepository.count()).isZero();
+    }
+
     private EventEnvelope<OrderConfirmedV1> confirmed(UUID orderId, UUID customerId) {
         return new EventEnvelope<>(
                 UUID.randomUUID(),
@@ -110,6 +151,38 @@ class NotificationKafkaIntegrationTest {
                         objectMapper.writeValueAsString(event)
                 )
                 .get(10, TimeUnit.SECONDS);
+    }
+
+    private ConsumerRecord<String, String> consumeMatching(String topic, String key) {
+        Map<String, Object> properties = Map.of(
+                ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, KAFKA.getBootstrapServers(),
+                ConsumerConfig.GROUP_ID_CONFIG, "notification-dlt-it-" + UUID.randomUUID(),
+                ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest",
+                ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, false,
+                ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class,
+                ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class
+        );
+        try (KafkaConsumer<String, String> consumer = new KafkaConsumer<>(properties)) {
+            consumer.subscribe(List.of(topic));
+            Instant deadline = Instant.now().plusSeconds(10);
+            while (Instant.now().isBefore(deadline)) {
+                for (ConsumerRecord<String, String> record : consumer.poll(Duration.ofMillis(250))) {
+                    if (key.equals(record.key())) {
+                        return record;
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    private String headerValue(ConsumerRecord<?, ?> record, String name) {
+        return new String(record.headers().lastHeader(name).value(), StandardCharsets.UTF_8);
+    }
+
+    private double metricCount(String name, String topic) {
+        Counter counter = meterRegistry.find(name).tag("topic", topic).counter();
+        return counter == null ? 0.0 : counter.count();
     }
 
     private void await(BooleanSupplier condition) throws InterruptedException {

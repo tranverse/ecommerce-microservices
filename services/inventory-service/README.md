@@ -67,6 +67,11 @@ The scheduled outbox publisher locks due rows with `FOR UPDATE SKIP LOCKED`, wai
 | `INVENTORY_DB_POOL_SIZE` | No | `10` | Maximum Hikari connections |
 | `INVENTORY_DB_MIN_IDLE` | No | `2` | Minimum idle Hikari connections |
 | `KAFKA_BOOTSTRAP_SERVERS` | No | `localhost:9092` | Kafka broker addresses |
+| `KAFKA_CONSUMER_MAX_RETRIES` | No | `3` | Retries after the initial delivery attempt |
+| `KAFKA_CONSUMER_RETRY_INITIAL_INTERVAL` | No | `PT0.25S` | First transient-failure backoff |
+| `KAFKA_CONSUMER_RETRY_MULTIPLIER` | No | `2.0` | Exponential retry multiplier |
+| `KAFKA_CONSUMER_RETRY_MAX_INTERVAL` | No | `PT2S` | Maximum retry interval |
+| `KAFKA_DLT_PUBLISH_TIMEOUT` | No | `PT5S` | Broker acknowledgement timeout for DLT publication |
 | `INVENTORY_KAFKA_CONSUMER_GROUP` | No | `inventory-service-v1` | Stable Inventory consumer group |
 | `INVENTORY_COMMANDS_TOPIC` | No | `inventory.commands.v1` | Saga command topic |
 | `SAGA_MESSAGING_LISTENER_ENABLED` | No | `true` | Start the Kafka listener |
@@ -85,4 +90,4 @@ cmd /c mvnw.cmd -pl services/inventory-service package
 docker build -f services/inventory-service/Dockerfile -t ecommerce/inventory-service:local .
 ```
 
-The 28 tests cover domain invariants, application use cases, MVC validation/errors, the full HTTP lifecycle, Flyway/Hibernate schema compatibility, concurrent oversell prevention, strict event parsing, transactional inbox/outbox behavior, duplicate delivery, business failure rollback, and the real Kafka/PostgreSQL command-to-outcome flow.
+The 29 tests cover domain invariants, application use cases, MVC validation/errors, the full HTTP lifecycle, Flyway/Hibernate schema compatibility, concurrent oversell prevention, strict event parsing, transactional inbox/outbox behavior, duplicate delivery, business failure rollback, and real Kafka/PostgreSQL success and DLT flows.

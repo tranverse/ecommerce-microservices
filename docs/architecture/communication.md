@@ -1,6 +1,6 @@
 # Service Communication
 
-Status: **Accepted; synchronous Product lookup, the terminal Order saga, and asynchronous Notification delivery are implemented.**
+Status: **Accepted; synchronous Product lookup, the terminal Order saga, asynchronous Notification delivery, and bounded Kafka recovery are implemented.**
 
 ## Decision policy
 
@@ -36,7 +36,9 @@ Notification consumes only `OrderConfirmed` and `OrderCancelled` because Order o
 - Aggregate ID is the Kafka message key when per-aggregate ordering matters.
 - Producers use a transactional outbox when database state and publication must not diverge.
 - Consumers assume at-least-once delivery and enforce idempotency before external side effects. Provider adapters also need a stable idempotency key because an inbox cannot atomically commit with an external provider.
-- Dead-letter handling is operational visibility, not a substitute for correct error handling.
+- Invalid contracts and deterministic conflicts skip retry. Transient failures use short bounded exponential retry before publication to a same-partition DLT.
+- DLT publication must be broker-acknowledged; failure metadata is retained without stack-trace headers, and recovery/recovery-failure metrics are emitted.
+- Dead-letter handling is operational visibility, not a substitute for correct error handling or Saga compensation. Replay is explicit for one topic/partition/offset and still passes through normal idempotency rules.
 
 ## Failure model
 

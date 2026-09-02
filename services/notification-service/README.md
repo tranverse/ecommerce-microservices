@@ -79,6 +79,11 @@ Order and customer IDs are opaque cross-service references. There are no cross-d
 | `NOTIFICATION_DB_USERNAME` | Database user | `notification_app` |
 | `NOTIFICATION_DB_PASSWORD` | Database password | Required; no default |
 | `KAFKA_BOOTSTRAP_SERVERS` | Kafka brokers | `localhost:9092` |
+| `KAFKA_CONSUMER_MAX_RETRIES` | Retries after the initial delivery attempt | `3` |
+| `KAFKA_CONSUMER_RETRY_INITIAL_INTERVAL` | First transient-failure backoff | `PT0.25S` |
+| `KAFKA_CONSUMER_RETRY_MULTIPLIER` | Exponential retry multiplier | `2.0` |
+| `KAFKA_CONSUMER_RETRY_MAX_INTERVAL` | Maximum retry interval | `PT2S` |
+| `KAFKA_DLT_PUBLISH_TIMEOUT` | Broker acknowledgement timeout for DLT publication | `PT5S` |
 | `NOTIFICATION_KAFKA_CONSUMER_GROUP` | Independent consumer group | `notification-service-v1` |
 | `ORDER_EVENTS_TOPIC` | Terminal order topic | `order.events.v1` |
 | `NOTIFICATION_MESSAGING_LISTENER_ENABLED` | Start Kafka listener | `true` |
@@ -99,4 +104,4 @@ Readiness is `http://localhost:8087/actuator/health/readiness`. There is intenti
 docker build -f services/notification-service/Dockerfile -t ecommerce/notification-service:local .
 ```
 
-The suite has 17 tests covering domain transitions, strict parsing, Flyway/JPA behavior, provider failure, contradictory or corrupted events, exact/semantic duplicates, and a real Kafka/PostgreSQL flow.
+The suite has 18 tests covering domain transitions, strict parsing, Flyway/JPA behavior, provider failure, contradictory or corrupted events, exact/semantic duplicates, and real Kafka/PostgreSQL success and DLT flows.

@@ -41,7 +41,7 @@ One `orderId` can own only one payment. A replay with the same amount/currency r
 
 The listener accepts only strict `PaymentRequested` v1 envelopes. Kafka key, aggregate ID, and payload order ID must agree; amount and currency must satisfy the same monetary contract as the domain. Unknown fields and unsupported versions go directly to the DLT.
 
-Provider unavailability is retried with bounded exponential backoff and the same durable `paymentId`. A known decline is not retried: it commits `FAILED`, the inbox record, and `PaymentFailed` outbox together. The outbox publisher marks messages only after broker acknowledgment and retains failures with bounded backoff.
+Provider unavailability is retried with bounded exponential backoff and the same durable `paymentId`. Exhaustion publishes the source command to `payment.commands.v1.DLT` while the payment remains `PENDING` and the inbox/outcome outbox remain absent. A known decline is not retried: it commits `FAILED`, the inbox record, and `PaymentFailed` outbox together. The outbox publisher marks messages only after broker acknowledgment and retains failures with bounded backoff.
 
 See [Payment Processing Flow](../../docs/flows/payment-processing-flow.md) and [ADR 008](../../docs/decisions/008-payment-processor-idempotency.md).
 
@@ -78,6 +78,11 @@ There is deliberately no foreign key to `order_db`. Hibernate uses `ddl-auto=val
 | `PAYMENT_SIMULATOR_DECLINE_PAYMENTS` | No | `false` |
 | `PAYMENT_SIMULATOR_UNAVAILABLE` | No | `false` |
 | `KAFKA_BOOTSTRAP_SERVERS` | No | `localhost:9092` |
+| `KAFKA_CONSUMER_MAX_RETRIES` | No | `3` |
+| `KAFKA_CONSUMER_RETRY_INITIAL_INTERVAL` | No | `PT0.25S` |
+| `KAFKA_CONSUMER_RETRY_MULTIPLIER` | No | `2.0` |
+| `KAFKA_CONSUMER_RETRY_MAX_INTERVAL` | No | `PT2S` |
+| `KAFKA_DLT_PUBLISH_TIMEOUT` | No | `PT5S` |
 | `PAYMENT_KAFKA_CONSUMER_GROUP` | No | `payment-service-v1` |
 | `PAYMENT_COMMANDS_TOPIC` | No | `payment.commands.v1` |
 | `SAGA_MESSAGING_LISTENER_ENABLED` | No | `true` |
@@ -95,6 +100,6 @@ From the repository root:
 docker build -f services/payment-service/Dockerfile -t ecommerce/payment-service:local .
 ```
 
-The 33 tests cover aggregate transitions, monetary validation, Flyway/database constraints, idempotent approval/decline/refund behavior, provider outage recovery and contract checks, strict event parsing, transactional outbox/inbox behavior, and real Kafka/PostgreSQL flows.
+The 36 tests cover aggregate transitions, monetary validation, Flyway/database constraints, idempotent approval/decline/refund behavior, transient recovery and retry exhaustion, strict event parsing, transactional outbox/inbox behavior, and real Kafka/PostgreSQL success and DLT flows.
 
 The multi-stage image contains a Java 21 JRE runtime, runs as the non-root `spring` user, exposes only actuator endpoints in this milestone, and checks readiness on port `8086`.

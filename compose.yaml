@@ -30,6 +30,13 @@ x-observability-environment: &observability-environment
   TRACING_SAMPLING_PROBABILITY: ${TRACING_SAMPLING_PROBABILITY:-1.0}
   LOGGING_STRUCTURED_FORMAT_CONSOLE: logstash
 
+x-kafka-consumer-environment: &kafka-consumer-environment
+  KAFKA_CONSUMER_MAX_RETRIES: ${KAFKA_CONSUMER_MAX_RETRIES:-3}
+  KAFKA_CONSUMER_RETRY_INITIAL_INTERVAL: ${KAFKA_CONSUMER_RETRY_INITIAL_INTERVAL:-PT0.25S}
+  KAFKA_CONSUMER_RETRY_MULTIPLIER: ${KAFKA_CONSUMER_RETRY_MULTIPLIER:-2.0}
+  KAFKA_CONSUMER_RETRY_MAX_INTERVAL: ${KAFKA_CONSUMER_RETRY_MAX_INTERVAL:-PT2S}
+  KAFKA_DLT_PUBLISH_TIMEOUT: ${KAFKA_DLT_PUBLISH_TIMEOUT:-PT5S}
+
 services:
   postgres:
     image: postgres:17.6-alpine
@@ -222,7 +229,7 @@ services:
       context: .
       dockerfile: services/inventory-service/Dockerfile
     environment:
-      <<: *observability-environment
+      <<: [*observability-environment, *kafka-consumer-environment]
       SERVER_PORT: 8084
       INVENTORY_DB_URL: jdbc:postgresql://postgres:5432/inventory_db
       INVENTORY_DB_USERNAME: ${INVENTORY_DB_USERNAME:-inventory_app}
@@ -247,7 +254,7 @@ services:
       context: .
       dockerfile: services/order-service/Dockerfile
     environment:
-      <<: *observability-environment
+      <<: [*observability-environment, *kafka-consumer-environment]
       SERVER_PORT: 8085
       ORDER_DB_URL: jdbc:postgresql://postgres:5432/order_db
       ORDER_DB_USERNAME: ${ORDER_DB_USERNAME:-order_app}
@@ -288,7 +295,7 @@ services:
       context: .
       dockerfile: services/payment-service/Dockerfile
     environment:
-      <<: *observability-environment
+      <<: [*observability-environment, *kafka-consumer-environment]
       SERVER_PORT: 8086
       PAYMENT_DB_URL: jdbc:postgresql://postgres:5432/payment_db
       PAYMENT_DB_USERNAME: ${PAYMENT_DB_USERNAME:-payment_app}
@@ -315,7 +322,7 @@ services:
       context: .
       dockerfile: services/notification-service/Dockerfile
     environment:
-      <<: *observability-environment
+      <<: [*observability-environment, *kafka-consumer-environment]
       SERVER_PORT: 8087
       NOTIFICATION_DB_URL: jdbc:postgresql://postgres:5432/notification_db
       NOTIFICATION_DB_USERNAME: ${NOTIFICATION_DB_USERNAME:-notification_app}
