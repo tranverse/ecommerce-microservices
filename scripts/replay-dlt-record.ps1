@@ -18,12 +18,16 @@ param(
     [ValidateRange(0, 9223372036854775807)]
     [long]$Offset,
 
-    [string]$ComposeEnvFile = ".env.example",
+    [string]$ComposeEnvFile = ".env",
 
     [switch]$Execute
 )
 
 $ErrorActionPreference = "Stop"
+
+if (-not (Test-Path -LiteralPath $ComposeEnvFile -PathType Leaf)) {
+    throw "Compose env file '$ComposeEnvFile' does not exist. Run scripts/bootstrap-local-env.ps1 first."
+}
 
 $dltTopic = "$OriginalTopic.DLT"
 $separator = "<|ECOMMERCE-DLT-KEY|>"

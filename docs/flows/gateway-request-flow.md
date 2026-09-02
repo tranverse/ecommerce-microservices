@@ -24,7 +24,7 @@ sequenceDiagram
     G-->>Client: 200 profile
 ```
 
-Gateway and User may cache JWKS independently. A cached public key avoids a call to Auth on every request, while explicit lookup timeouts bound cache-miss/key-rotation failure.
+Gateway and User may cache JWKS independently. A cached public key avoids a call to Auth on every request, while explicit lookup timeouts bound cache-miss/key-rotation failure. Compose therefore mounts the same generated signing configuration into every replacement Auth container: a routine restart keeps the same `kid` and key, so already issued tokens remain verifiable. Production rotation requires publishing old and new keys concurrently for at least the access-token lifetime plus verifier-cache allowance.
 
 ## Public Product Read
 

@@ -46,7 +46,9 @@ Logout is idempotent and does not reveal whether a supplied token existed. The c
 
 ## Signing Keys
 
-For normal local development, Auth generates an ephemeral 2048-bit RSA key at startup and publishes only its public portion. Restarting invalidates old local access tokens. This avoids committing a private development key.
+When Auth is run directly without a configured key, it may generate an ephemeral 2048-bit RSA key for convenient isolated development. Restarting that direct process invalidates its old access tokens.
+
+The complete Compose environment does not use that fallback. `scripts/bootstrap-local-env.ps1` generates a stable local pair in ignored `.env`, and Compose requires it. Auth validates that the supplied PKCS#8 private key and X.509 public key have the same RSA modulus before accepting traffic. Restarting Auth with the same `.env` therefore preserves token validity; intentionally replacing `.env` or running the bootstrap with `-Force` rotates the key and invalidates tokens unless an overlap rotation is implemented.
 
 With the `prod` profile, startup fails unless both variables are provided:
 
@@ -65,9 +67,10 @@ Production keys must come from secret management and support an operational rota
 | `AUTH_JWT_ISSUER` | No | `http://localhost:8081` |
 | `AUTH_JWT_ACCESS_TOKEN_TTL` | No | `PT15M` |
 | `AUTH_JWT_REFRESH_TOKEN_TTL` | No | `P30D` |
-| `AUTH_JWT_KEY_ID` | No | `ecommerce-local-key` |
-| `AUTH_JWT_PRIVATE_KEY_BASE64` | Required in `prod` | Empty/local generated key |
-| `AUTH_JWT_PUBLIC_KEY_BASE64` | Required in `prod` | Empty/local generated key |
+| `AUTH_JWT_KEY_ID` | Required in Compose/`prod` | `ecommerce-local-key` for direct local fallback |
+| `AUTH_JWT_PRIVATE_KEY_BASE64` | Required in Compose/`prod` | Empty/direct local generated key |
+| `AUTH_JWT_PUBLIC_KEY_BASE64` | Required in Compose/`prod` | Empty/direct local generated key |
+| `AUTH_JWT_REQUIRE_CONFIGURED_KEY` | No | `false`; forced to `true` by Compose/`prod` |
 | `SERVER_PORT` | No | `8081` |
 
 ## Build and Test
@@ -78,4 +81,4 @@ cmd /c mvnw.cmd -pl services/auth-service package
 docker build -f services/auth-service/Dockerfile -t ecommerce/auth-service:local .
 ```
 
-The 15 tests cover domain/token behavior, password hashing, timing equalization, JWT cryptographic decoding, public-only JWKS, validation, duplicate registration, generic login failure, refresh rotation/reuse, logout revocation, security-filter errors, Flyway, JPA, and full HTTP behavior on PostgreSQL 17.6.
+The 20 tests cover domain/token behavior, password hashing, timing equalization, JWT cryptographic decoding, public-only JWKS, configured key-pair validation and fail-fast behavior, duplicate registration, generic login failure, refresh rotation/reuse, logout revocation, security-filter errors, Flyway, JPA, and full HTTP behavior on PostgreSQL 17.6.

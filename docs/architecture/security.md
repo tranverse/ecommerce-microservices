@@ -43,7 +43,9 @@ JWT validation is local and avoids an Auth network call on every request. The tr
 
 ## Key Lifecycle
 
-Local ephemeral keys optimize safe developer startup without repository secrets. Production requires externally managed keys. Rotation should publish both old and new public keys during the overlap, sign new tokens with a new `kid`, wait beyond maximum access-token TTL, then remove the old public key.
+An isolated direct Auth process may generate an ephemeral key for convenience. The Compose baseline instead requires the stable pair generated into ignored `.env` by `scripts/bootstrap-local-env.ps1`; this lets cached JWKS verification survive normal Auth restarts without committing key material. Auth rejects a partial, malformed, or mismatched configured pair at startup. Production requires the same environment-variable contract to be supplied by a secret manager rather than a file.
+
+Safe rotation is not the same as replacing one key in place. Auth should publish both old and new public keys during an overlap, sign new tokens with a new `kid`, wait beyond the maximum access-token lifetime and verifier-cache window, then remove the old public key. The current single-key implementation supports stable restart but not zero-downtime rotation; `-Force` is therefore an explicit local token-invalidating operation.
 
 ## Sensitive Data and Logging
 

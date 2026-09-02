@@ -1,8 +1,12 @@
 param(
-    [string]$ComposeEnvFile = ".env.example"
+    [string]$ComposeEnvFile = ".env"
 )
 
 $ErrorActionPreference = "Stop"
+
+if (-not (Test-Path -LiteralPath $ComposeEnvFile -PathType Leaf)) {
+    throw "Compose env file '$ComposeEnvFile' does not exist. Run scripts/bootstrap-local-env.ps1 first."
+}
 
 function Get-ComposeHttpUrl {
     param(

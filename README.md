@@ -2,7 +2,7 @@
 
 A production-style Java 21 and Spring Boot 3 e-commerce system built incrementally as both a runnable distributed application and a practical microservices course.
 
-> **Implementation status:** API Gateway, Auth, User, Product, Inventory, Order, Payment, and Notification are implemented, containerized, and wired into one Docker Compose environment. The Kafka saga confirms orders and inventory after payment success, or releases inventory and cancels orders after payment failure. Notification consumes the terminal Order fact idempotently without blocking that workflow. Product uses failure-tolerant Redis cache-aside while PostgreSQL remains authoritative. Metrics, distributed tracing, structured centralized logs, and a provisioned Grafana dashboard cover the connected runtime. Automatic profile provisioning remains a planned milestone.
+> **Implementation status:** API Gateway, Auth, User, Product, Inventory, Order, Payment, and Notification are implemented, containerized, and wired into one Docker Compose environment. The Kafka saga confirms orders and inventory after payment success, or releases inventory and cancels orders after payment failure. Notification consumes the terminal Order fact idempotently without blocking that workflow. Product uses failure-tolerant Redis cache-aside while PostgreSQL remains authoritative. Metrics, distributed tracing, structured centralized logs, and a provisioned Grafana dashboard cover the connected runtime. Compose bootstraps ignored local secrets and a stable RSA signing key so Auth restarts do not invalidate existing access tokens. Automatic profile provisioning remains a planned milestone.
 
 ## Project Overview
 
@@ -139,7 +139,7 @@ Accepted target:
 │   ├── decisions/
 │   ├── flows/
 │   └── learning/
-├── scripts/                    # Repeatable local verification tools
+├── scripts/                    # Secret bootstrap and repeatable local verification tools
 ├── pom.xml                     # Build aggregation only
 ├── compose.yaml
 └── .env.example
@@ -433,7 +433,7 @@ docker build -f services/notification-service/Dockerfile -t ecommerce/notificati
 Compose starts eight applications, one Kafka KRaft broker, one PostgreSQL server containing seven service-owned databases/users, one ephemeral Redis cache, and the Prometheus/Tempo/Loki/Alloy/Grafana observability stack. Co-location saves local memory; it does not permit shared tables or credentials.
 
 ```powershell
-Copy-Item .env.example .env
+.\scripts\bootstrap-local-env.ps1
 docker compose up --build -d
 docker compose ps
 ./scripts/verify-compose.ps1
@@ -464,7 +464,7 @@ docker compose down
 
 The smoke script seeds a unique product and stock item, registers a customer through Gateway, submits an order, and verifies `Order=CONFIRMED`, `Inventory=CONFIRMED`, `Payment=COMPLETED`, and `Notification=SENT`. Its direct Product/Inventory setup calls and database assertions are local test-harness behavior, not production access patterns. The observability script waits for and verifies Prometheus, Tempo, Loki, Alloy, Grafana, all eight application scrape targets, and the expected Compose processes.
 
-Grafana is available at `http://localhost:3000`, Prometheus at `http://localhost:9090`, Tempo at `http://localhost:3200`, Loki at `http://localhost:3100`, and Alloy at `http://localhost:12345`. All ports are loopback-only. Grafana credentials and tracing sample probability are configured in `.env` from development-only examples.
+Grafana is available at `http://localhost:3000`, Prometheus at `http://localhost:9090`, Tempo at `http://localhost:3200`, Loki at `http://localhost:3100`, and Alloy at `http://localhost:12345`. All ports are loopback-only. The bootstrap script creates cryptographically random local passwords and an RSA signing pair in ignored `.env`; it never prints secret values. Re-running it requires explicit `-Force` because replacing the signing key deliberately invalidates outstanding access tokens.
 
 Named PostgreSQL and Kafka volumes survive `down`. Redis persistence is disabled because the cache is disposable and rebuilds from `product_db`. `docker compose down -v` is an intentional destructive reset. See [Docker Compose and Networking](docs/learning/14-docker-compose-and-networking.md), [Redis Cache-Aside](docs/learning/20-redis-cache-aside-and-staleness.md), and [ADR 014](docs/decisions/014-product-cache-aside.md).
 
@@ -509,8 +509,10 @@ Auth Service supports:
 | `AUTH_JWT_ISSUER` | Exact trusted token issuer | `http://localhost:8081` |
 | `AUTH_JWT_ACCESS_TOKEN_TTL` | Access-token lifetime | `PT15M` |
 | `AUTH_JWT_REFRESH_TOKEN_TTL` | Refresh-token lifetime | `P30D` |
-| `AUTH_JWT_PRIVATE_KEY_BASE64` | Base64 PKCS#8 RSA private key | Ephemeral outside production; required in production |
-| `AUTH_JWT_PUBLIC_KEY_BASE64` | Base64 X.509 RSA public key | Derived outside production; required in production |
+| `AUTH_JWT_KEY_ID` | JWKS identifier for the active signing key | Generated fingerprint in local Compose |
+| `AUTH_JWT_PRIVATE_KEY_BASE64` | Base64 PKCS#8 RSA private key | Generated into ignored `.env`; externally supplied in production |
+| `AUTH_JWT_PUBLIC_KEY_BASE64` | Matching Base64 X.509 RSA public key | Generated into ignored `.env`; externally supplied in production |
+| `AUTH_JWT_REQUIRE_CONFIGURED_KEY` | Fail startup instead of generating an ephemeral key | `true` in Compose and production |
 
 User Service supports:
 
@@ -685,7 +687,7 @@ Run every implemented service suite:
 .\mvnw.cmd test
 ```
 
-Product has 28 tests covering cache hits/misses, after-commit invalidation, fail-open behavior, cache metrics, batch access, and real Redis/PostgreSQL lifecycle behavior; Inventory has 29 including concurrent reservation plus real Kafka/PostgreSQL success and DLT flows, Auth has 16 covering cryptography/token lifecycle and metrics security, User has 18 covering resource-server security, ownership, and metrics security, Gateway has 10 covering routing, edge behavior, and metrics security, Order has 56 covering acceptance, Product resilience, metrics security, outbox/inbox, strict Inventory/Payment event parsing, terminal state transitions, compensation, and real Kafka/PostgreSQL success/DLT flows, Payment has 36 covering state transitions, database constraints, provider retry/refund semantics, bounded transient retry, exhausted recovery, strict event contracts, outbox/inbox behavior, and real Kafka/PostgreSQL flows, and Notification has 18 covering delivery state, strict terminal event parsing, duplicates, provider failure, contradictory/corrupted outcomes, and real Kafka/PostgreSQL success/DLT flows. The implemented reactor currently has 211 tests. Each service uses the smallest meaningful combination of unit, controller, repository, integration, security, proxy, and Testcontainers tests.
+Product has 28 tests covering cache hits/misses, after-commit invalidation, fail-open behavior, cache metrics, batch access, and real Redis/PostgreSQL lifecycle behavior; Inventory has 29 including concurrent reservation plus real Kafka/PostgreSQL success and DLT flows, Auth has 20 covering cryptography/token lifecycle, configured key-pair validation, fail-fast configuration, and metrics security, User has 18 covering resource-server security, ownership, and metrics security, Gateway has 10 covering routing, edge behavior, and metrics security, Order has 56 covering acceptance, Product resilience, metrics security, outbox/inbox, strict Inventory/Payment event parsing, terminal state transitions, compensation, and real Kafka/PostgreSQL success/DLT flows, Payment has 36 covering state transitions, database constraints, provider retry/refund semantics, bounded transient retry, exhausted recovery, strict event contracts, outbox/inbox behavior, and real Kafka/PostgreSQL flows, and Notification has 18 covering delivery state, strict terminal event parsing, duplicates, provider failure, contradictory/corrupted outcomes, and real Kafka/PostgreSQL success/DLT flows. The implemented reactor currently has 215 tests. Each service uses the smallest meaningful combination of unit, controller, repository, integration, security, proxy, and Testcontainers tests.
 
 ## Documentation
 
@@ -706,6 +708,7 @@ Product has 28 tests covering cache hits/misses, after-commit invalidation, fail
 - [Kafka consumer failure flow](docs/flows/kafka-failure-flow.md)
 - [Observability request flow](docs/flows/observability-flow.md)
 - [Product cache-aside decision](docs/decisions/014-product-cache-aside.md)
+- [Stable local secrets and signing-key decision](docs/decisions/015-stable-local-secrets-and-signing-key.md)
 - [Architecture decisions](docs/decisions/)
 - [Learning notes](docs/learning/)
 
@@ -735,8 +738,9 @@ Start with:
 18. [Metrics and Centralized Logging](docs/learning/18-metrics-and-centralized-logging.md)
 19. [Kafka Retries, Dead Letters, and Replay](docs/learning/19-kafka-retries-dead-letters-and-replay.md)
 20. [Redis Cache-Aside and Staleness](docs/learning/20-redis-cache-aside-and-staleness.md)
-21. Read the ADRs and compare their alternatives.
-22. Follow the Gateway, Auth, User, Product, Inventory, Order, Payment, and Notification READMEs from adapters to application services, domains, repositories, migrations, and tests.
+21. [Configuration, Secrets, and Signing-Key Rotation](docs/learning/21-configuration-secrets-and-key-rotation.md)
+22. Read the ADRs and compare their alternatives.
+23. Follow the Gateway, Auth, User, Product, Inventory, Order, Payment, and Notification READMEs from adapters to application services, domains, repositories, migrations, and tests.
 
 Later notes will reference the exact service, class, endpoint, migration, event, and configuration that implements each concept.
 

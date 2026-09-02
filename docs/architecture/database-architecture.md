@@ -43,7 +43,7 @@ flowchart TB
     PG --> NotificationDB[notification_db / notification_app]
 ```
 
-Local placeholder credentials are copied from `.env.example` into the ignored `.env` file and supplied through environment variables. Real credentials and `.env` files must never be committed.
+`scripts/bootstrap-local-env.ps1` replaces the `.env.example` placeholders with cryptographically random local credentials in ignored `.env`, then Compose supplies them through environment variables. Real credentials and `.env` files must never be committed.
 
 ## Production evolution
 

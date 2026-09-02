@@ -81,7 +81,7 @@ Readiness and liveness answer different questions:
 ## Local commands
 
 ```powershell
-Copy-Item .env.example .env
+.\scripts\bootstrap-local-env.ps1
 docker compose up --build -d
 docker compose ps
 ./scripts/verify-compose.ps1
@@ -110,6 +110,7 @@ For the cache failure path, stop only Redis, read an existing product, and confi
 - Relying on Kafka auto-topic creation.
 - Exposing every backend port on all host interfaces.
 - Committing `.env` or private JWT keys.
+- Regenerating the local signing key on every Auth restart and unexpectedly invalidating tokens cached by clients or JWKS verifiers.
 - Running `down -v` without understanding that named-volume data is deleted.
 
 ## Questions
@@ -120,6 +121,7 @@ For the cache failure path, stop only Redis, read an existing product, and confi
 4. Why does Flyway remain inside each service instead of the PostgreSQL bootstrap script?
 5. Which ports are required for service-to-service traffic, and which are only debugging conveniences?
 6. Why can Redis lose all local data without violating Product Service correctness?
+7. Why must Compose keep Auth's signing key stable across container restarts?
 
 ## Practical exercise
 

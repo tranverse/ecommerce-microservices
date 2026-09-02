@@ -34,7 +34,7 @@ Push-Location $repositoryRoot
 
 try {
     if (-not (Test-Path -LiteralPath $ComposeEnvFile)) {
-        throw "Compose env file '$ComposeEnvFile' does not exist. Copy .env.example to .env first."
+        throw "Compose env file '$ComposeEnvFile' does not exist. Run scripts/bootstrap-local-env.ps1 first."
     }
 
     $suffix = [Guid]::NewGuid().ToString("N").Substring(0, 10)

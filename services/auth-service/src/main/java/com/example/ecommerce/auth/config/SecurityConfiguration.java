@@ -125,7 +125,12 @@ public class SecurityConfiguration {
                     Base64.getDecoder().decode(properties.privateKeyBase64())));
             RSAPublicKey publicKey = (RSAPublicKey) keyFactory.generatePublic(new X509EncodedKeySpec(
                     Base64.getDecoder().decode(properties.publicKeyBase64())));
+            if (!privateKey.getModulus().equals(publicKey.getModulus())) {
+                throw new IllegalStateException("Configured JWT RSA key pair does not match");
+            }
             return new RSAKey.Builder(publicKey).privateKey(privateKey).keyID(properties.keyId()).build();
+        } catch (IllegalStateException exception) {
+            throw exception;
         } catch (Exception exception) {
             throw new IllegalStateException("Configured JWT RSA key is invalid", exception);
         }

@@ -190,9 +190,10 @@ services:
       AUTH_DB_POOL_SIZE: ${AUTH_DB_POOL_SIZE:-5}
       AUTH_DB_MIN_IDLE: ${AUTH_DB_MIN_IDLE:-1}
       AUTH_JWT_ISSUER: ${AUTH_JWT_ISSUER:-http://localhost:8081}
-      AUTH_JWT_PRIVATE_KEY_BASE64: ${AUTH_JWT_PRIVATE_KEY_BASE64:-}
-      AUTH_JWT_PUBLIC_KEY_BASE64: ${AUTH_JWT_PUBLIC_KEY_BASE64:-}
-      AUTH_JWT_REQUIRE_CONFIGURED_KEY: "false"
+      AUTH_JWT_KEY_ID: ${AUTH_JWT_KEY_ID:?Run scripts/bootstrap-local-env.ps1}
+      AUTH_JWT_PRIVATE_KEY_BASE64: ${AUTH_JWT_PRIVATE_KEY_BASE64:?Run scripts/bootstrap-local-env.ps1}
+      AUTH_JWT_PUBLIC_KEY_BASE64: ${AUTH_JWT_PUBLIC_KEY_BASE64:?Run scripts/bootstrap-local-env.ps1}
+      AUTH_JWT_REQUIRE_CONFIGURED_KEY: "true"
     labels:
       observability.logs: "true"
     depends_on:

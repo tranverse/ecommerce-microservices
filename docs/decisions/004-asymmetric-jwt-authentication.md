@@ -29,7 +29,7 @@ Resource services can validate access tokens locally during an Auth outage. Asym
 - Key rotation and clock synchronization become operational responsibilities.
 - Access tokens are larger than opaque identifiers.
 - Refresh-token storage and cleanup remain stateful.
-- Local ephemeral keys invalidate tokens on restart, deliberately limited to non-production use.
+- A direct standalone local process may use an ephemeral key; the full Compose baseline requires an ignored stable local key so routine Auth restarts preserve issued tokens.
 
 ## Consequences
 

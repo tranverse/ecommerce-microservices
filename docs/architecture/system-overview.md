@@ -107,6 +107,6 @@ Synchronous acceptance through `202`, the asynchronous saga through a terminal O
 
 ## Deployment view
 
-Local development uses Docker Compose, one container per application, Kafka, Redis, a PostgreSQL server hosting separate logical databases and users, and a single-node observability stack. Compose DNS supplies internal addresses; only loopback host ports are published for local access. Redis is intentionally ephemeral locally. Production deployment may isolate databases physically, operate Redis as a replicated managed cache, and replace local observability storage without changing application protocols or service ownership.
+Local development uses Docker Compose, one container per application, Kafka, Redis, a PostgreSQL server hosting separate logical databases and users, and a single-node observability stack. A bootstrap script creates ignored random local credentials and a stable RSA signing pair; Compose refuses to start Auth without that pair. Compose DNS supplies internal addresses; only loopback host ports are published for local access. Redis is intentionally ephemeral locally. Production deployment may isolate databases physically, operate Redis as a replicated managed cache, source secrets from a platform secret manager, and replace local observability storage without changing application protocols or service ownership.
 
 Kubernetes is intentionally deferred until the complete Docker Compose environment works and has passing end-to-end validation.

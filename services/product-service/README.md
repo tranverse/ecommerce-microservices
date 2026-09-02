@@ -74,7 +74,7 @@ Swagger UI is available at `http://localhost:8083/swagger-ui.html` and the OpenA
 | `PRODUCT_CACHE_TTL` | No | `PT5M` | Maximum lifetime of a cached product snapshot |
 | `SERVER_PORT` | No | `8083` | HTTP port |
 
-No credential is stored in source control. Copy the root `.env.example` and choose local-only secrets before starting Compose.
+No credential is stored in source control. Run `scripts/bootstrap-local-env.ps1` once to generate ignored local secrets before starting Compose.
 
 Redis is an optimization, not an availability dependency. Redis health is excluded from Product readiness; a connection, command, serialization, or value-validation failure is recorded and treated as a cache miss. PostgreSQL failures still fail the request because Product cannot safely fabricate authoritative catalog data.
 

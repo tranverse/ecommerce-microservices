@@ -64,7 +64,7 @@ Tempo and Loki use local filesystem storage with 24-hour retention. Prometheus k
 Start and verify the stack:
 
 ```powershell
-Copy-Item .env.example .env
+.\scripts\bootstrap-local-env.ps1
 docker compose up --build -d
 .\scripts\verify-observability.ps1
 .\scripts\verify-compose.ps1
@@ -80,7 +80,7 @@ Local endpoints:
 | Loki readiness/API | `http://localhost:3100` |
 | Alloy UI | `http://localhost:12345` |
 
-Grafana provisions the three data sources and the **E-Commerce Service Overview** dashboard automatically. Local credentials come from `.env`; `.env.example` contains development-only placeholders.
+Grafana provisions the three data sources and the **E-Commerce Service Overview** dashboard automatically. The bootstrap script writes a random local Grafana password to ignored `.env`; `.env.example` contains only configuration defaults and placeholders.
 
 ## Failure interpretation
 
@@ -89,4 +89,3 @@ Grafana provisions the three data sources and the **E-Commerce Service Overview*
 - Missing traces with healthy requests may be expected under sampling; inspect exporter health and the configured probability before declaring data loss.
 - Missing logs can originate at Docker discovery, Alloy processing, or Loki ingestion. Alloy only collects containers labelled `observability.logs=true`.
 - Trace-to-log links require the JSON `traceId` field. Business-flow searches across asynchronous saga steps should use `correlationId`.
-
