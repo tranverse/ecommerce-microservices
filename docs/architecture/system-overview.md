@@ -8,7 +8,7 @@ The platform supports a customer journey from registration and login through pro
 
 ## Current state
 
-API Gateway, Auth, User, Product, Inventory, Order orchestration, Payment, and Notification are implemented, containerized, tested, documented, and connected by Docker Compose. Gateway routes Order traffic and applies coarse roles; Order validates Auth JWTs again, scopes data to `sub`, obtains trusted Product snapshots through one bounded batch call, and commits the order plus its first saga command only to `order_db`. Inventory consumes reservation and status commands idempotently from `inventory_db`. Order records Inventory outcomes in its inbox: success atomically moves the order to `PAYMENT_PENDING` and creates `PaymentRequested`; reservation failure cancels it. Payment calls its idempotent provider port outside a database transaction, then atomically commits the terminal payment state, inbox, and `PaymentCompleted` or `PaymentFailed` outbox in `payment_db`. Order consumes that outcome: success confirms the order and requests inventory confirmation, while failure cancels the order and requests inventory release. Notification consumes the resulting `OrderConfirmed` or `OrderCancelled`, stores an idempotent delivery record in `notification_db`, and simulates delivery without blocking Order. All four Kafka-consuming services classify deterministic poison messages separately from transient failures, use bounded exponential retry, require acknowledged DLT publication, and expose failure/recovery metrics plus exact-record replay tooling. Prometheus metrics, OpenTelemetry traces through Tempo, JSON logs through Alloy/Loki, and a provisioned Grafana dashboard cover all eight applications. Product and Inventory management APIs still need their own resource-server enforcement before direct exposure is safe. Registration-to-profile auto-provisioning remains pending. A component is not considered implemented until its code, tests, runtime configuration, and documentation are present.
+API Gateway, Auth, User, Product, Inventory, Order orchestration, Payment, and Notification are implemented, containerized, tested, documented, and connected by Docker Compose. Product uses Redis cache-aside for ID and batch reads while PostgreSQL remains authoritative; Redis failure degrades to database reads and does not remove Product from readiness. Gateway routes Order traffic and applies coarse roles; Order validates Auth JWTs again, scopes data to `sub`, obtains trusted Product snapshots through one bounded batch call, and commits the order plus its first saga command only to `order_db`. Inventory consumes reservation and status commands idempotently from `inventory_db`. Order records Inventory outcomes in its inbox: success atomically moves the order to `PAYMENT_PENDING` and creates `PaymentRequested`; reservation failure cancels it. Payment calls its idempotent provider port outside a database transaction, then atomically commits the terminal payment state, inbox, and `PaymentCompleted` or `PaymentFailed` outbox in `payment_db`. Order consumes that outcome: success confirms the order and requests inventory confirmation, while failure cancels the order and requests inventory release. Notification consumes the resulting `OrderConfirmed` or `OrderCancelled`, stores an idempotent delivery record in `notification_db`, and simulates delivery without blocking Order. All four Kafka-consuming services classify deterministic poison messages separately from transient failures, use bounded exponential retry, require acknowledged DLT publication, and expose failure/recovery metrics plus exact-record replay tooling. Prometheus metrics, OpenTelemetry traces through Tempo, JSON logs through Alloy/Loki, and a provisioned Grafana dashboard cover all eight applications. Product and Inventory management APIs still need their own resource-server enforcement before direct exposure is safe. Registration-to-profile auto-provisioning remains pending. A component is not considered implemented until its code, tests, runtime configuration, and documentation are present.
 
 ## Target architecture
 
@@ -27,6 +27,7 @@ flowchart LR
     Auth --> AuthDB[(auth_db)]
     User --> UserDB[(user_db)]
     Product --> ProductDB[(product_db)]
+    Product -.->|cache-aside; fail-open| Redis[(Redis)]
     Inventory --> InventoryDB[(inventory_db)]
     Order --> OrderDB[(order_db)]
     Payment --> PaymentDB[(payment_db)]
@@ -60,10 +61,11 @@ flowchart LR
 ### Product browsing
 
 ```text
-Client -> Gateway -> Product Service -> product_db
+Client -> Gateway -> Product Service -> Redis cache
+                                  \-> product_db on miss
 ```
 
-This flow is synchronous because the client needs an immediate catalog response.
+This flow is synchronous because the client needs an immediate catalog response. Redis is a disposable acceleration layer; it neither owns catalog state nor participates in Product's transaction.
 
 ### Order creation
 
@@ -105,6 +107,6 @@ Synchronous acceptance through `202`, the asynchronous saga through a terminal O
 
 ## Deployment view
 
-Local development uses Docker Compose, one container per application, Kafka, a PostgreSQL server hosting separate logical databases and users, and a single-node observability stack. Compose DNS supplies internal addresses; only loopback host ports are published for local access. Production deployment may isolate databases physically and replace local observability storage without changing application protocols or service ownership.
+Local development uses Docker Compose, one container per application, Kafka, Redis, a PostgreSQL server hosting separate logical databases and users, and a single-node observability stack. Compose DNS supplies internal addresses; only loopback host ports are published for local access. Redis is intentionally ephemeral locally. Production deployment may isolate databases physically, operate Redis as a replicated managed cache, and replace local observability storage without changing application protocols or service ownership.
 
 Kubernetes is intentionally deferred until the complete Docker Compose environment works and has passing end-to-end validation.

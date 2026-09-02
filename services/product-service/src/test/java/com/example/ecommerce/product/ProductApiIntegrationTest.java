@@ -10,6 +10,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.client.TestRestTemplate;
 import org.springframework.context.annotation.Import;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
@@ -21,15 +22,19 @@ import java.math.BigDecimal;
 import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-@Import(TestcontainersConfiguration.class)
+@Import({TestcontainersConfiguration.class, RedisTestcontainersConfiguration.class})
 class ProductApiIntegrationTest {
 
     @Autowired
     private TestRestTemplate restTemplate;
+
+    @Autowired
+    private StringRedisTemplate redisTemplate;
 
     @Test
     void createsReadsUpdatesAndRejectsStaleVersion() {
@@ -67,6 +72,9 @@ class ProductApiIntegrationTest {
         );
         assertThat(getResponse.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(getResponse.getBody()).extracting(ProductResponse::sku).isEqualTo(sku);
+        String cacheKey = "ecommerce:product:" + created.id();
+        assertThat(redisTemplate.hasKey(cacheKey)).isTrue();
+        assertThat(redisTemplate.getExpire(cacheKey, TimeUnit.SECONDS)).isBetween(1L, 300L);
 
         UpdateProductRequest update = new UpdateProductRequest(
                 "Developer Laptop Pro",
@@ -85,6 +93,7 @@ class ProductApiIntegrationTest {
         );
         assertThat(updateResponse.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(updateResponse.getBody()).extracting(ProductResponse::version).isEqualTo(1L);
+        assertThat(redisTemplate.hasKey(cacheKey)).isFalse();
 
         ResponseEntity<ProductResponse[]> batchResponse = restTemplate.getForEntity(
                 "/api/v1/products/batch?ids={firstId}&ids={missingId}",
@@ -96,6 +105,7 @@ class ProductApiIntegrationTest {
         assertThat(List.of(batchResponse.getBody()))
                 .extracting(ProductResponse::id)
                 .containsExactly(created.id());
+        assertThat(redisTemplate.hasKey(cacheKey)).isTrue();
 
         ResponseEntity<ApiErrorResponse> staleResponse = restTemplate.exchange(
                 "/api/v1/products/{id}",

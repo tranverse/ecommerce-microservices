@@ -20,8 +20,21 @@ spring:
       hibernate:
         jdbc:
           time_zone: UTC
+  data:
+    redis:
+      url: ${PRODUCT_REDIS_URL:redis://localhost:6379}
+      connect-timeout: ${PRODUCT_REDIS_CONNECT_TIMEOUT:PT0.5S}
+      timeout: ${PRODUCT_REDIS_COMMAND_TIMEOUT:PT0.5S}
+      repositories:
+        enabled: false
   lifecycle:
     timeout-per-shutdown-phase: 20s
+
+product:
+  cache:
+    enabled: ${PRODUCT_CACHE_ENABLED:true}
+    key-prefix: ${PRODUCT_CACHE_KEY_PREFIX:ecommerce:product:}
+    ttl: ${PRODUCT_CACHE_TTL:PT5M}
 
 server:
   port: ${SERVER_PORT:8083}
@@ -37,6 +50,9 @@ management:
       show-details: never
       probes:
         enabled: true
+  health:
+    redis:
+      enabled: false
   metrics:
     tags:
       application: ${spring.application.name}

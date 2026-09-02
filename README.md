@@ -2,7 +2,7 @@
 
 A production-style Java 21 and Spring Boot 3 e-commerce system built incrementally as both a runnable distributed application and a practical microservices course.
 
-> **Implementation status:** API Gateway, Auth, User, Product, Inventory, Order, Payment, and Notification are implemented, containerized, and wired into one Docker Compose environment. The Kafka saga confirms orders and inventory after payment success, or releases inventory and cancels orders after payment failure. Notification consumes the terminal Order fact idempotently without blocking that workflow. Metrics, distributed tracing, structured centralized logs, and a provisioned Grafana dashboard cover the connected runtime. Automatic profile provisioning remains a planned milestone.
+> **Implementation status:** API Gateway, Auth, User, Product, Inventory, Order, Payment, and Notification are implemented, containerized, and wired into one Docker Compose environment. The Kafka saga confirms orders and inventory after payment success, or releases inventory and cancels orders after payment failure. Notification consumes the terminal Order fact idempotently without blocking that workflow. Product uses failure-tolerant Redis cache-aside while PostgreSQL remains authoritative. Metrics, distributed tracing, structured centralized logs, and a provisioned Grafana dashboard cover the connected runtime. Automatic profile provisioning remains a planned milestone.
 
 ## Project Overview
 
@@ -46,6 +46,7 @@ flowchart LR
     Auth --> AuthDB[(auth_db)]
     User --> UserDB[(user_db)]
     Product --> ProductDB[(product_db)]
+    Product -.->|cache-aside| Redis[(Redis)]
     Inventory --> InventoryDB[(inventory_db)]
     Order --> OrderDB[(order_db)]
     Payment --> PaymentDB[(payment_db)]
@@ -61,7 +62,7 @@ The complete design and current-state warning are maintained in [System Overview
 | API Gateway | Public routing, correlation IDs, edge security | Implemented |
 | Auth Service | Credentials, password hashing, JWT and roles | Implemented |
 | User Service | Customer profiles and addresses | Implemented |
-| Product Service | Catalog, current prices, filtering and management | Implemented |
+| Product Service | Catalog, current prices, filtering, management, and failure-tolerant read caching | Implemented |
 | Inventory Service | Stock, reservations, releases and concurrency | REST API and Kafka saga participant implemented |
 | Order Service | Authenticated orders, immutable item snapshots and saga orchestration | Acceptance, Inventory/Payment outcomes, confirmation, and compensation implemented |
 | Payment Service | Idempotent simulated charges, declines, outage recovery and refunds | Core workflow and Kafka saga participant implemented |
@@ -81,13 +82,14 @@ Detailed ownership and prohibited coupling are documented in [Service Boundaries
 | Spring Security and JWT | Auth lifecycle, public JWKS, local token validation | Active in Auth, User, Order, and Gateway; other services pending |
 | Spring Cloud Gateway | Reactive edge routing without business logic | Active |
 | Kafka | Durable asynchronous saga communication and notifications | Active through terminal Order outcomes and Notification delivery |
-| Testcontainers | Integration tests against real PostgreSQL/Kafka behavior | Active for PostgreSQL and Kafka |
+| Testcontainers | Integration tests against real dependency behavior | Active for PostgreSQL, Kafka, and Redis |
 | Resilience4j | Bounded failure handling for justified synchronous calls | Active for Order-to-Product |
+| Redis | Shared disposable cache for Product ID and batch reads | Active with fail-open behavior and bounded TTL |
 | Micrometer/OpenTelemetry | Prometheus metrics and OTLP distributed traces | Active across all applications |
 | Grafana, Tempo, Loki, Alloy | Dashboards, trace storage, centralized logs and collection | Active in local Compose |
 | Docker Compose | Reproducible complete local environment | Active with E2E verification |
 
-Redis and Kubernetes are deliberately deferred until a concrete need exists and Docker Compose works end to end.
+Kubernetes is deliberately deferred until its deployment milestone; the complete Docker Compose environment remains the executable local baseline.
 
 ## Repository Structure
 
@@ -99,7 +101,7 @@ Current:
 │   ├── api-gateway/            # Edge routing, JWT roles, timeouts, correlation IDs
 │   ├── auth-service/           # Credentials, JWT/JWKS, auth_db, security tests
 │   ├── user-service/           # Profiles, addresses, user_db, ownership tests
-│   ├── product-service/        # Catalog API, product_db, tests, and image
+│   ├── product-service/        # Catalog API, product_db, Redis cache adapter, tests, and image
 │   ├── inventory-service/      # Stock reservations, inventory_db, concurrency tests
 │   ├── order-service/          # Authenticated acceptance, snapshots, order_db, state machine
 │   ├── payment-service/        # Idempotent charge/refund workflow and payment_db
@@ -428,7 +430,7 @@ docker build -f services/notification-service/Dockerfile -t ecommerce/notificati
 
 ## Full local stack with Docker Compose
 
-Compose starts eight applications, one Kafka KRaft broker, one PostgreSQL server containing seven service-owned databases/users, and the Prometheus/Tempo/Loki/Alloy/Grafana observability stack. Co-location saves local memory; it does not permit shared tables or credentials.
+Compose starts eight applications, one Kafka KRaft broker, one PostgreSQL server containing seven service-owned databases/users, one ephemeral Redis cache, and the Prometheus/Tempo/Loki/Alloy/Grafana observability stack. Co-location saves local memory; it does not permit shared tables or credentials.
 
 ```powershell
 Copy-Item .env.example .env
@@ -438,7 +440,7 @@ docker compose ps
 ./scripts/verify-observability.ps1
 ```
 
-Use the Gateway at `http://localhost:8080`. Ports `8081` through `8087`, PostgreSQL `5432`, and Kafka `9092` are bound to `127.0.0.1` for local inspection only. Containers call each other through Compose DNS such as `auth-service:8081`, `product-service:8083`, `postgres:5432`, and `kafka:19092`; `localhost` inside a container refers only to that container.
+Use the Gateway at `http://localhost:8080`. Ports `8081` through `8087`, PostgreSQL `5432`, Redis `6379`, and Kafka `9092` are bound to `127.0.0.1` for local inspection only. Containers call each other through Compose DNS such as `auth-service:8081`, `product-service:8083`, `postgres:5432`, `redis:6379`, and `kafka:19092`; `localhost` inside a container refers only to that container.
 
 Kafka automatic topic creation is disabled. The one-shot `kafka-init` service creates the five versioned workflow topics and their DLTs before consumers start. Application readiness checks gate dependent startup, but they do not replace runtime timeout/retry/circuit-breaker behavior.
 
@@ -464,7 +466,7 @@ The smoke script seeds a unique product and stock item, registers a customer thr
 
 Grafana is available at `http://localhost:3000`, Prometheus at `http://localhost:9090`, Tempo at `http://localhost:3200`, Loki at `http://localhost:3100`, and Alloy at `http://localhost:12345`. All ports are loopback-only. Grafana credentials and tracing sample probability are configured in `.env` from development-only examples.
 
-Named PostgreSQL and Kafka volumes survive `down`. `docker compose down -v` is an intentional destructive reset. See [Docker Compose and Networking](docs/learning/14-docker-compose-and-networking.md) and [ADR 010](docs/decisions/010-local-compose-topology.md).
+Named PostgreSQL and Kafka volumes survive `down`. Redis persistence is disabled because the cache is disposable and rebuilds from `product_db`. `docker compose down -v` is an intentional destructive reset. See [Docker Compose and Networking](docs/learning/14-docker-compose-and-networking.md), [Redis Cache-Aside](docs/learning/20-redis-cache-aside-and-staleness.md), and [ADR 014](docs/decisions/014-product-cache-aside.md).
 
 ## Configuration
 
@@ -478,6 +480,12 @@ Product Service supports:
 | `PRODUCT_DB_PASSWORD` | Product database password | Required; no default |
 | `PRODUCT_DB_POOL_SIZE` | Maximum database pool size | `10` |
 | `PRODUCT_DB_MIN_IDLE` | Minimum idle connections | `2` |
+| `PRODUCT_REDIS_URL` | Redis connection URL | `redis://localhost:6379` |
+| `PRODUCT_REDIS_CONNECT_TIMEOUT` | Redis connection timeout | `PT0.5S` |
+| `PRODUCT_REDIS_COMMAND_TIMEOUT` | Redis command timeout | `PT0.5S` |
+| `PRODUCT_CACHE_ENABLED` | Enable Product cache-aside | `true` |
+| `PRODUCT_CACHE_KEY_PREFIX` | Redis key namespace | `ecommerce:product:` |
+| `PRODUCT_CACHE_TTL` | Maximum cache lifetime | `PT5M` |
 
 Inventory Service supports:
 
@@ -677,7 +685,7 @@ Run every implemented service suite:
 .\mvnw.cmd test
 ```
 
-Product has 20 tests, Inventory has 29 including concurrent reservation plus real Kafka/PostgreSQL success and DLT flows, Auth has 16 covering cryptography/token lifecycle and metrics security, User has 18 covering resource-server security, ownership, and metrics security, Gateway has 10 covering routing, edge behavior, and metrics security, Order has 56 covering acceptance, Product resilience, metrics security, outbox/inbox, strict Inventory/Payment event parsing, terminal state transitions, compensation, and real Kafka/PostgreSQL success/DLT flows, Payment has 36 covering state transitions, database constraints, provider retry/refund semantics, bounded transient retry, exhausted recovery, strict event contracts, outbox/inbox behavior, and real Kafka/PostgreSQL flows, and Notification has 18 covering delivery state, strict terminal event parsing, duplicates, provider failure, contradictory/corrupted outcomes, and real Kafka/PostgreSQL success/DLT flows. The implemented reactor currently has 203 tests. Each service uses the smallest meaningful combination of unit, controller, repository, integration, security, proxy, and Testcontainers tests.
+Product has 28 tests covering cache hits/misses, after-commit invalidation, fail-open behavior, cache metrics, batch access, and real Redis/PostgreSQL lifecycle behavior; Inventory has 29 including concurrent reservation plus real Kafka/PostgreSQL success and DLT flows, Auth has 16 covering cryptography/token lifecycle and metrics security, User has 18 covering resource-server security, ownership, and metrics security, Gateway has 10 covering routing, edge behavior, and metrics security, Order has 56 covering acceptance, Product resilience, metrics security, outbox/inbox, strict Inventory/Payment event parsing, terminal state transitions, compensation, and real Kafka/PostgreSQL success/DLT flows, Payment has 36 covering state transitions, database constraints, provider retry/refund semantics, bounded transient retry, exhausted recovery, strict event contracts, outbox/inbox behavior, and real Kafka/PostgreSQL flows, and Notification has 18 covering delivery state, strict terminal event parsing, duplicates, provider failure, contradictory/corrupted outcomes, and real Kafka/PostgreSQL success/DLT flows. The implemented reactor currently has 211 tests. Each service uses the smallest meaningful combination of unit, controller, repository, integration, security, proxy, and Testcontainers tests.
 
 ## Documentation
 
@@ -697,6 +705,7 @@ Product has 20 tests, Inventory has 29 including concurrent reservation plus rea
 - [Notification delivery flow](docs/flows/notification-flow.md)
 - [Kafka consumer failure flow](docs/flows/kafka-failure-flow.md)
 - [Observability request flow](docs/flows/observability-flow.md)
+- [Product cache-aside decision](docs/decisions/014-product-cache-aside.md)
 - [Architecture decisions](docs/decisions/)
 - [Learning notes](docs/learning/)
 
@@ -725,8 +734,9 @@ Start with:
 17. [Distributed Tracing](docs/learning/17-distributed-tracing.md)
 18. [Metrics and Centralized Logging](docs/learning/18-metrics-and-centralized-logging.md)
 19. [Kafka Retries, Dead Letters, and Replay](docs/learning/19-kafka-retries-dead-letters-and-replay.md)
-20. Read the ADRs and compare their alternatives.
-21. Follow the Gateway, Auth, User, Product, Inventory, Order, Payment, and Notification READMEs from adapters to application services, domains, repositories, migrations, and tests.
+20. [Redis Cache-Aside and Staleness](docs/learning/20-redis-cache-aside-and-staleness.md)
+21. Read the ADRs and compare their alternatives.
+22. Follow the Gateway, Auth, User, Product, Inventory, Order, Payment, and Notification READMEs from adapters to application services, domains, repositories, migrations, and tests.
 
 Later notes will reference the exact service, class, endpoint, migration, event, and configuration that implements each concept.
 

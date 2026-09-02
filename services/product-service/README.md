@@ -2,6 +2,8 @@
 
 Product Service owns the product catalog: identity, immutable SKU, descriptive information, current price, currency, and lifecycle status. Inventory quantity deliberately belongs to Inventory Service.
 
+PostgreSQL is the source of truth. Redis accelerates product-by-ID and batch snapshot reads with a five-minute cache-aside policy; search results remain uncached because their invalidation and key cardinality are substantially more complex.
+
 ## API
 
 Base path: `/api/v1/products`
@@ -64,9 +66,24 @@ Swagger UI is available at `http://localhost:8083/swagger-ui.html` and the OpenA
 | `PRODUCT_DB_USERNAME` | No | `product_app` | Database owner/user |
 | `PRODUCT_DB_POOL_SIZE` | No | `10` | Maximum Hikari connections |
 | `PRODUCT_DB_MIN_IDLE` | No | `2` | Minimum idle Hikari connections |
+| `PRODUCT_REDIS_URL` | No | `redis://localhost:6379` | Redis connection URL |
+| `PRODUCT_REDIS_CONNECT_TIMEOUT` | No | `PT0.5S` | Maximum Redis connection establishment time |
+| `PRODUCT_REDIS_COMMAND_TIMEOUT` | No | `PT0.5S` | Maximum Redis command time |
+| `PRODUCT_CACHE_ENABLED` | No | `true` | Enable Product read caching without changing business behavior |
+| `PRODUCT_CACHE_KEY_PREFIX` | No | `ecommerce:product:` | Namespace for Product cache keys |
+| `PRODUCT_CACHE_TTL` | No | `PT5M` | Maximum lifetime of a cached product snapshot |
 | `SERVER_PORT` | No | `8083` | HTTP port |
 
-No credential is stored in source control. Copy the root `.env.example` and choose a local-only password when Compose support is introduced.
+No credential is stored in source control. Copy the root `.env.example` and choose local-only secrets before starting Compose.
+
+Redis is an optimization, not an availability dependency. Redis health is excluded from Product readiness; a connection, command, serialization, or value-validation failure is recorded and treated as a cache miss. PostgreSQL failures still fail the request because Product cannot safely fabricate authoritative catalog data.
+
+Cache metrics are exposed through the loopback-published local actuator endpoint. Production must enforce its own network boundary:
+
+- `ecommerce_product_cache_requests_total{result="hit|miss"}`
+- `ecommerce_product_cache_errors_total{operation="..."}`
+- `ecommerce_product_cache_writes_total`
+- `ecommerce_product_cache_evictions_total`
 
 ## Build and Test
 
@@ -78,7 +95,7 @@ cmd /c mvnw.cmd -pl services/product-service package
 docker build -f services/product-service/Dockerfile -t ecommerce/product-service:local .
 ```
 
-The 20 tests include pure domain/service tests, batch lookup behavior, a Spring MVC slice, JPA repository tests, Flyway validation, and a full HTTP integration flow against PostgreSQL 17.6 through Testcontainers.
+The 28 tests include pure domain/service tests, after-commit cache invalidation, cache failure behavior and metrics, batch lookup behavior, a Spring MVC slice, JPA repository tests, Flyway validation, and a full HTTP cache lifecycle against PostgreSQL 17.6 and Redis 8.2 through Testcontainers.
 
 ## Internal Design
 
@@ -86,9 +103,12 @@ The 20 tests include pure domain/service tests, batch lookup behavior, a Spring 
 - `service` owns local transaction boundaries and business workflow.
 - `domain` protects SKU, price, currency, and lifecycle invariants.
 - `repository` contains JPA persistence and composable search specifications.
+- `cache` defines an application-facing port and its failure-tolerant Redis adapter; Product business code does not depend on Redis APIs.
 - `dto` is the public API contract; JPA entities never leave the service.
 - `exception` converts expected failures to a stable client contract.
 - `web` establishes a correlation ID for responses and logs.
 - `db/migration` is the only source of schema changes; Hibernate only validates.
 
 Product currently has no JPA relationships, so there is no N+1 query path. Future relationships must be justified from concrete query patterns rather than made eager by default.
+
+Single reads use cache-aside. Batch reads use one Redis multi-get, one `findAllById` query for all misses, and pipelined cache writes, avoiding both database and network N+1 patterns. Updates evict only after the PostgreSQL transaction commits, closing the race where another request could repopulate stale data before commit. If eviction fails, TTL bounds staleness to five minutes by default.

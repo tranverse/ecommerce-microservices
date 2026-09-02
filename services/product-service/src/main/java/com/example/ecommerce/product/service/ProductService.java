@@ -1,5 +1,6 @@
 package com.example.ecommerce.product.service;
 
+import com.example.ecommerce.product.cache.ProductCache;
 import com.example.ecommerce.product.domain.Product;
 import com.example.ecommerce.product.domain.ProductStatus;
 import com.example.ecommerce.product.dto.CreateProductRequest;
@@ -22,12 +23,17 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.math.BigDecimal;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Service
 public class ProductService {
@@ -37,10 +43,16 @@ public class ProductService {
 
     private final ProductRepository productRepository;
     private final ProductMapper productMapper;
+    private final ProductCache productCache;
 
-    public ProductService(ProductRepository productRepository, ProductMapper productMapper) {
+    public ProductService(
+            ProductRepository productRepository,
+            ProductMapper productMapper,
+            ProductCache productCache
+    ) {
         this.productRepository = productRepository;
         this.productMapper = productMapper;
+        this.productCache = productCache;
     }
 
     @Transactional
@@ -69,14 +81,30 @@ public class ProductService {
 
     @Transactional(readOnly = true)
     public ProductResponse getProduct(UUID productId) {
-        return productMapper.toResponse(findProduct(productId));
+        return productCache.get(productId).orElseGet(() -> {
+            ProductResponse product = productMapper.toResponse(findProduct(productId));
+            productCache.put(product);
+            return product;
+        });
     }
 
     @Transactional(readOnly = true)
     public List<ProductResponse> getProducts(Set<UUID> productIds) {
-        return productRepository.findAllById(productIds).stream()
-                .sorted(Comparator.comparing(Product::getId))
+        Map<UUID, ProductResponse> products = new HashMap<>(productCache.getAll(productIds));
+        Set<UUID> missingIds = productIds.stream()
+                .filter(productId -> !products.containsKey(productId))
+                .collect(Collectors.toSet());
+
+        List<ProductResponse> loaded = missingIds.isEmpty()
+                ? List.of()
+                : productRepository.findAllById(missingIds).stream()
                 .map(productMapper::toResponse)
+                .toList();
+        productCache.putAll(loaded);
+        loaded.forEach(product -> products.put(product.id(), product));
+
+        return products.values().stream()
+                .sorted(Comparator.comparing(ProductResponse::id))
                 .toList();
     }
 
@@ -117,7 +145,24 @@ public class ProductService {
         );
         Product saved = productRepository.saveAndFlush(product);
         log.info("Updated product id={} version={}", saved.getId(), saved.getVersion());
-        return productMapper.toResponse(saved);
+        ProductResponse response = productMapper.toResponse(saved);
+        evictProductCacheAfterCommit(productId);
+        return response;
+    }
+
+    private void evictProductCacheAfterCommit(UUID productId) {
+        if (!TransactionSynchronizationManager.isActualTransactionActive()
+                || !TransactionSynchronizationManager.isSynchronizationActive()) {
+            productCache.evict(productId);
+            return;
+        }
+
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                productCache.evict(productId);
+            }
+        });
     }
 
     private Product findProduct(UUID productId) {

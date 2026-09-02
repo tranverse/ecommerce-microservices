@@ -2,7 +2,7 @@
 
 ## What problem does Compose solve?
 
-The application now has eight independently started Java processes, seven logical databases, a Kafka broker, durable volumes, health checks, and several internal URLs. Starting those pieces manually is slow and produces configuration drift. Docker Compose defines one repeatable local topology without turning the services back into a monolith.
+The application now has eight independently started Java processes, seven logical databases, a Kafka broker, a Redis cache, durable source-of-truth volumes, health checks, and several internal URLs. Starting those pieces manually is slow and produces configuration drift. Docker Compose defines one repeatable local topology without turning the services back into a monolith.
 
 Compose is a development and integration environment here. It is not a production scheduler and it does not provide self-healing across machines like Kubernetes.
 
@@ -23,6 +23,7 @@ flowchart LR
 
     Auth -->|postgres:5432/auth_db| PG[(PostgreSQL)]
     Product -->|postgres:5432/product_db| PG
+    Product -.->|redis:6379| Redis[(Redis)]
     Order -->|postgres:5432/order_db| PG
 
     Order -->|kafka:19092| Kafka[(Kafka)]
@@ -41,7 +42,9 @@ Port publishing is only needed when the host must reach a container. Service-to-
 | Order to Product | `http://product-service:8083` | Internal Compose DNS |
 | Services to PostgreSQL | `postgres:5432/<owned_db>` | Internal database listener |
 | Services to Kafka | `kafka:19092` | Broker advertises a reachable internal address |
+| Product to Redis | `redis:6379` | Internal optional cache dependency |
 | Host tools to Kafka | `localhost:9092` | Separate advertised host listener |
+| Host tools to Redis | `localhost:6379` | Loopback-only cache inspection |
 
 All published ports bind to `127.0.0.1`. Direct backend ports are convenient for local debugging, but production traffic must enter through the Gateway or a private network policy.
 
@@ -66,7 +69,7 @@ Automatic topic creation is disabled. The one-shot `kafka-init` container create
 
 ## Health and startup ordering
 
-Compose waits for PostgreSQL and Kafka health, then waits for topic creation before starting Kafka participants. Application Dockerfiles probe `/actuator/health/readiness`.
+Compose waits for PostgreSQL and Kafka health, then waits for topic creation before starting Kafka participants. Application Dockerfiles probe `/actuator/health/readiness`. Product deliberately does not wait for Redis and excludes Redis from readiness because PostgreSQL can still serve authoritative reads.
 
 This only improves startup. If Product becomes unavailable after Order starts, Compose does not make the HTTP call reliable. Order's runtime timeout, retry, and circuit-breaker policy is covered in [Timeouts, Retries, and Circuit Breakers](15-timeouts-retries-and-circuit-breakers.md).
 
@@ -86,7 +89,7 @@ docker compose logs -f order-service inventory-service payment-service notificat
 docker compose down
 ```
 
-`docker compose down -v` also deletes Kafka and PostgreSQL data. Use it only when a full local reset is intentional.
+`docker compose down -v` also deletes Kafka and PostgreSQL data. Use it only when a full local reset is intentional. Redis has persistence disabled because cached data is disposable and can be rebuilt from Product's database.
 
 ## Failure lab
 
@@ -96,11 +99,14 @@ docker compose down
 4. Start Product again, wait for the open interval, and observe half-open recovery probes.
 5. Explain why `depends_on` did not help after startup and why Order still refuses to invent a fallback price.
 
+For the cache failure path, stop only Redis, read an existing product, and confirm Product still returns authoritative data within its bounded Redis timeout. Product readiness should remain `UP`, while cache error/miss metrics increase.
+
 ## Common mistakes
 
 - Using `localhost` for container-to-container calls.
 - Sharing the PostgreSQL superuser with applications.
 - Treating startup ordering as runtime resilience.
+- Making an optional cache a readiness dependency and causing cascading restarts.
 - Relying on Kafka auto-topic creation.
 - Exposing every backend port on all host interfaces.
 - Committing `.env` or private JWT keys.
@@ -113,6 +119,7 @@ docker compose down
 3. What happens when a healthy dependency fails after startup?
 4. Why does Flyway remain inside each service instead of the PostgreSQL bootstrap script?
 5. Which ports are required for service-to-service traffic, and which are only debugging conveniences?
+6. Why can Redis lose all local data without violating Product Service correctness?
 
 ## Practical exercise
 

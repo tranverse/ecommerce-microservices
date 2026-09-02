@@ -148,6 +148,33 @@ services:
     networks:
       - ecommerce
 
+  redis:
+    image: redis:8.2.9-alpine
+    restart: unless-stopped
+    command:
+      - redis-server
+      - --save
+      - ""
+      - --appendonly
+      - "no"
+      - --maxmemory
+      - 128mb
+      - --maxmemory-policy
+      - allkeys-lru
+    ports:
+      - "127.0.0.1:${REDIS_HOST_PORT:-6379}:6379"
+    healthcheck:
+      test:
+        - CMD
+        - redis-cli
+        - ping
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+    networks:
+      - ecommerce
+
   auth-service:
     <<: *application-defaults
     image: ecommerce/auth-service:local
@@ -214,6 +241,12 @@ services:
       PRODUCT_DB_PASSWORD: ${PRODUCT_DB_PASSWORD:?Set PRODUCT_DB_PASSWORD in .env}
       PRODUCT_DB_POOL_SIZE: ${PRODUCT_DB_POOL_SIZE:-5}
       PRODUCT_DB_MIN_IDLE: ${PRODUCT_DB_MIN_IDLE:-1}
+      PRODUCT_REDIS_URL: redis://redis:6379
+      PRODUCT_REDIS_CONNECT_TIMEOUT: ${PRODUCT_REDIS_CONNECT_TIMEOUT:-PT0.5S}
+      PRODUCT_REDIS_COMMAND_TIMEOUT: ${PRODUCT_REDIS_COMMAND_TIMEOUT:-PT0.5S}
+      PRODUCT_CACHE_ENABLED: ${PRODUCT_CACHE_ENABLED:-true}
+      PRODUCT_CACHE_KEY_PREFIX: ${PRODUCT_CACHE_KEY_PREFIX:-ecommerce:product:}
+      PRODUCT_CACHE_TTL: ${PRODUCT_CACHE_TTL:-PT5M}
     labels:
       observability.logs: "true"
     depends_on:
