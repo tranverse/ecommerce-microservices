@@ -2,7 +2,7 @@
 
 A production-style Java 21 and Spring Boot 3 e-commerce system built incrementally as both a runnable distributed application and a practical microservices course.
 
-> **Implementation status:** API Gateway, Auth, User, Product, Inventory, Order, Payment, and Notification are implemented, containerized, and wired into one Docker Compose environment. The Kafka saga confirms orders and inventory after payment success, or releases inventory and cancels orders after payment failure. Notification consumes the terminal Order fact idempotently without blocking that workflow. Product uses failure-tolerant Redis cache-aside while PostgreSQL remains authoritative. Metrics, distributed tracing, structured centralized logs, and a provisioned Grafana dashboard cover the connected runtime. Compose bootstraps ignored local secrets and a stable RSA signing key so Auth restarts do not invalidate existing access tokens. Automatic profile provisioning remains a planned milestone.
+> **Implementation status:** API Gateway, Auth, User, Product, Inventory, Order, Payment, and Notification are implemented, containerized, and wired into one Docker Compose environment. The Kafka saga confirms orders and inventory after payment success, or releases inventory and cancels orders after payment failure. Notification consumes the terminal Order fact idempotently without blocking that workflow. Product uses failure-tolerant Redis cache-aside while PostgreSQL remains authoritative. Metrics, distributed tracing, structured centralized logs, and a provisioned Grafana dashboard cover the connected runtime. Compose bootstraps ignored local secrets and a stable RSA signing key so Auth restarts do not invalidate existing access tokens. GitHub Actions now runs the full reactor and builds every service image; version tags publish immutable, attestable images to GHCR. Automatic profile provisioning remains a planned milestone.
 
 ## Project Overview
 
@@ -88,6 +88,7 @@ Detailed ownership and prohibited coupling are documented in [Service Boundaries
 | Micrometer/OpenTelemetry | Prometheus metrics and OTLP distributed traces | Active across all applications |
 | Grafana, Tempo, Loki, Alloy | Dashboards, trace storage, centralized logs and collection | Active in local Compose |
 | Docker Compose | Reproducible complete local environment | Active with E2E verification |
+| GitHub Actions and GHCR | Automated quality gates and immutable container artifacts | Active for branches, pull requests, and version tags |
 
 Kubernetes is deliberately deferred until its deployment milestone; the complete Docker Compose environment remains the executable local baseline.
 
@@ -97,6 +98,10 @@ Current:
 
 ```text
 .
+├── .github/
+│   ├── workflows/              # Reactor verification, image builds, and versioned releases
+│   └── dependabot.yml          # Scheduled Maven and Actions update pull requests
+├── contracts/                  # Versioned event schemas shared as contracts, never entities
 ├── services/
 │   ├── api-gateway/            # Edge routing, JWT roles, timeouts, correlation IDs
 │   ├── auth-service/           # Credentials, JWT/JWKS, auth_db, security tests
@@ -111,10 +116,13 @@ Current:
 │   ├── decisions/
 │   ├── flows/
 │   └── learning/
+├── infrastructure/             # Local databases and observability configuration
+├── scripts/                    # Secret bootstrap and repeatable verification tools
 ├── pom.xml                     # Current reactor build aggregator
 ├── mvnw
 ├── mvnw.cmd
 ├── .mvn/
+├── compose.yaml
 └── README.md
 ```
 
@@ -689,6 +697,14 @@ Run every implemented service suite:
 
 Product has 28 tests covering cache hits/misses, after-commit invalidation, fail-open behavior, cache metrics, batch access, and real Redis/PostgreSQL lifecycle behavior; Inventory has 29 including concurrent reservation plus real Kafka/PostgreSQL success and DLT flows, Auth has 20 covering cryptography/token lifecycle, configured key-pair validation, fail-fast configuration, and metrics security, User has 18 covering resource-server security, ownership, and metrics security, Gateway has 10 covering routing, edge behavior, and metrics security, Order has 56 covering acceptance, Product resilience, metrics security, outbox/inbox, strict Inventory/Payment event parsing, terminal state transitions, compensation, and real Kafka/PostgreSQL success/DLT flows, Payment has 36 covering state transitions, database constraints, provider retry/refund semantics, bounded transient retry, exhausted recovery, strict event contracts, outbox/inbox behavior, and real Kafka/PostgreSQL flows, and Notification has 18 covering delivery state, strict terminal event parsing, duplicates, provider failure, contradictory/corrupted outcomes, and real Kafka/PostgreSQL success/DLT flows. The implemented reactor currently has 215 tests. Each service uses the smallest meaningful combination of unit, controller, repository, integration, security, proxy, and Testcontainers tests.
 
+## CI/CD
+
+`.github/workflows/ci.yml` runs for `main`, `feature/**`, `fix/**`, pull requests to `main`, and manual dispatch. Its read-only quality job runs the complete Maven `verify` lifecycle, creates a disposable environment file, validates the rendered Compose model, and removes that file even after failure. Only after those gates pass does a matrix build all eight service images independently. Concurrency cancellation prevents stale commits on the same ref from consuming runner capacity.
+
+Version tags matching `v*.*.*` trigger `release-images.yml`. The workflow reruns the reactor and grants `packages: write` only to the publish matrix. Each service is pushed to `ghcr.io/<owner>/<repository>/<service>` with the version tag and an immutable `sha-<12-character-commit>` tag, OCI source/revision/version labels, an SBOM, and provenance attestation. It deliberately performs no deployment: artifact creation and environment rollout have different permissions, rollback rules, and approval needs.
+
+Third-party Actions are pinned to reviewed commit SHAs. Dependabot opens bounded weekly Maven and GitHub Actions update pull requests so those pins remain deliberate and reviewable. See [ADR 016](docs/decisions/016-ci-and-release-images.md) and [Microservice Testing and Delivery](docs/learning/22-microservice-testing-and-delivery.md).
+
 ## Documentation
 
 - [System overview](docs/architecture/system-overview.md)
@@ -709,6 +725,7 @@ Product has 28 tests covering cache hits/misses, after-commit invalidation, fail
 - [Observability request flow](docs/flows/observability-flow.md)
 - [Product cache-aside decision](docs/decisions/014-product-cache-aside.md)
 - [Stable local secrets and signing-key decision](docs/decisions/015-stable-local-secrets-and-signing-key.md)
+- [CI quality gates and image release decision](docs/decisions/016-ci-and-release-images.md)
 - [Architecture decisions](docs/decisions/)
 - [Learning notes](docs/learning/)
 
@@ -739,8 +756,9 @@ Start with:
 19. [Kafka Retries, Dead Letters, and Replay](docs/learning/19-kafka-retries-dead-letters-and-replay.md)
 20. [Redis Cache-Aside and Staleness](docs/learning/20-redis-cache-aside-and-staleness.md)
 21. [Configuration, Secrets, and Signing-Key Rotation](docs/learning/21-configuration-secrets-and-key-rotation.md)
-22. Read the ADRs and compare their alternatives.
-23. Follow the Gateway, Auth, User, Product, Inventory, Order, Payment, and Notification READMEs from adapters to application services, domains, repositories, migrations, and tests.
+22. [Microservice Testing and Delivery](docs/learning/22-microservice-testing-and-delivery.md)
+23. Read the ADRs and compare their alternatives.
+24. Follow the Gateway, Auth, User, Product, Inventory, Order, Payment, and Notification READMEs from adapters to application services, domains, repositories, migrations, and tests.
 
 Later notes will reference the exact service, class, endpoint, migration, event, and configuration that implements each concept.
 
